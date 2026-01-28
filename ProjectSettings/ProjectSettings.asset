@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!129 &1
+PlayerSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 24
+  productGUID: 83b4b23e9f7b94c4ca6e8d1f3a2b5c7d
+  productName: Sky Ring Terrarium
+  companyName: SkyRingTerrarium
+  defaultCursor: {fileID: 0}
+  cursorHotspot: {x: 0, y: 0}
+  defaultScreenWidth: 1920
+  defaultScreenHeight: 1080
+  defaultScreenWidthWeb: 960
+  defaultScreenHeightWeb: 600
+  renderingPath: 3
+  colorSpace: 1
+  useHDR: 1
+  activeInputHandler: 2
+  virtualTexturingSupportEnabled: 0
+  targetArchitectures: 1
+  scriptingDefineSymbols: {}
+  additionalCompilerArguments: {}
+  scriptingBackend:
+    Standalone: 1
+  apiCompatibilityLevelPerPlatform:
+    Standalone: 3
+  buildNumber:
+    Standalone: 0
