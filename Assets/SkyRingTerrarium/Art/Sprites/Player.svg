@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="bodyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4FC3F7;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0288D1;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="visorGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#E1F5FE;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#81D4FA;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Body -->
+  <ellipse cx="32" cy="40" rx="16" ry="20" fill="url(#bodyGrad)" stroke="#01579B" stroke-width="2"/>
+  <!-- Helmet -->
+  <circle cx="32" cy="18" r="14" fill="url(#bodyGrad)" stroke="#01579B" stroke-width="2"/>
+  <!-- Visor -->
+  <ellipse cx="32" cy="18" rx="10" ry="8" fill="url(#visorGrad)" stroke="#0288D1" stroke-width="1"/>
+  <!-- Visor shine -->
+  <ellipse cx="28" cy="15" rx="3" ry="2" fill="white" opacity="0.5"/>
+  <!-- Jetpack -->
+  <rect x="10" y="30" width="8" height="18" rx="2" fill="#FF7043" stroke="#BF360C" stroke-width="1"/>
+  <rect x="46" y="30" width="8" height="18" rx="2" fill="#FF7043" stroke="#BF360C" stroke-width="1"/>
+  <!-- Thrust flames placeholder -->
+  <polygon points="14,48 10,60 18,60" fill="#FFEB3B" opacity="0.8"/>
+  <polygon points="50,48 46,60 54,60" fill="#FFEB3B" opacity="0.8"/>
+</svg>
