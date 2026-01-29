@@ -5,12 +5,13 @@ namespace SkyRingTerrarium.Core
 {
     /// <summary>
     /// Defines a zero-gravity zone (Float Band) where objects can float freely.
-    /// Objects entering this zone gradually lose gravity influence.
+    /// Objects entering this zone gradually lose gravity influence and can enter gravity selection mode.
     /// </summary>
     public class FloatBand : MonoBehaviour
     {
         public static event Action<GravityAffectedBody> OnBodyEnteredFloatBand;
         public static event Action<GravityAffectedBody> OnBodyExitedFloatBand;
+        public static event Action<GravityAffectedBody> OnBodyFullyInFloatBand;
 
         [Header("Float Band Configuration")]
         [SerializeField] private float bandHeight = 10f;
@@ -21,13 +22,31 @@ namespace SkyRingTerrarium.Core
         [SerializeField] private float dampingStrength = 2f;
         [SerializeField] private float floatOscillationAmplitude = 0.5f;
         [SerializeField] private float floatOscillationFrequency = 1f;
+        [SerializeField] private float velocityDamping = 0.98f;
+
+        [Header("Gravity Selection")]
+        [SerializeField] private bool autoEnterGravitySelection = false;
+        [SerializeField] private float selectionModeDelay = 0.5f;
 
         [Header("Debug")]
         [SerializeField] private bool showDebugGizmos = true;
         [SerializeField] private Color bandColor = new Color(0.5f, 0.8f, 1f, 0.3f);
+        [SerializeField] private Color transitionColor = new Color(0.3f, 0.6f, 0.9f, 0.2f);
 
         public float BandHeight => bandHeight;
         public float BandAltitude => bandAltitude;
+        public float TransitionZone => transitionZone;
+
+        private float[] bodyTimeInBand;
+        private GravityAffectedBody[] trackedBodies;
+        private int trackedBodyCount;
+        private const int MAX_TRACKED_BODIES = 32;
+
+        private void Awake()
+        {
+            bodyTimeInBand = new float[MAX_TRACKED_BODIES];
+            trackedBodies = new GravityAffectedBody[MAX_TRACKED_BODIES];
+        }
 
         private void FixedUpdate()
         {
@@ -45,126 +64,221 @@ namespace SkyRingTerrarium.Core
             float altitude = GetAltitudeAboveRing(body.transform.position);
             float floatFactor = CalculateFloatFactor(altitude);
 
-            if (floatFactor > 0)
+            bool wasInBand = body.IsInFloatBand;
+            bool isFullyInBand = floatFactor >= 1f;
+            bool isInTransition = floatFactor > 0f && floatFactor < 1f;
+            bool isInBandZone = floatFactor > 0f;
+
+            body.SetFloatBandBlend(floatFactor);
+
+            if (isInBandZone && !wasInBand)
             {
-                float originalScale = body.GravityScale;
-                body.GravityScale = Mathf.Lerp(originalScale, 0f, floatFactor);
+                body.IsInFloatBand = true;
+                OnBodyEnteredFloatBand?.Invoke(body);
+                TrackBody(body);
+            }
+            else if (!isInBandZone && wasInBand)
+            {
+                body.IsInFloatBand = false;
+                OnBodyExitedFloatBand?.Invoke(body);
+                UntrackBody(body);
+            }
 
-                if (floatFactor > 0.5f)
+            if (isFullyInBand)
+            {
+                ApplyFloatBandPhysics(body, floatFactor);
+                
+                int index = GetTrackedIndex(body);
+                if (index >= 0)
                 {
-                    ApplyFloatDamping(body);
-                    ApplyFloatOscillation(body, floatFactor);
-                }
-
-                if (floatFactor >= 1f && !IsInFloatBand(body))
-                {
-                    SetInFloatBand(body, true);
-                    OnBodyEnteredFloatBand?.Invoke(body);
+                    float prevTime = bodyTimeInBand[index];
+                    bodyTimeInBand[index] += Time.fixedDeltaTime;
+                    
+                    if (prevTime < selectionModeDelay && bodyTimeInBand[index] >= selectionModeDelay)
+                    {
+                        OnBodyFullyInFloatBand?.Invoke(body);
+                        
+                        if (autoEnterGravitySelection && OmnidirectionalGravity.Instance != null)
+                        {
+                            OmnidirectionalGravity.Instance.TryEnterSelectionMode();
+                        }
+                    }
                 }
             }
-            else
+            else if (isInTransition)
             {
-                if (IsInFloatBand(body))
-                {
-                    SetInFloatBand(body, false);
-                    OnBodyExitedFloatBand?.Invoke(body);
-                }
-                body.GravityScale = 1f;
+                ApplyTransitionPhysics(body, floatFactor);
             }
+        }
+
+        private void TrackBody(GravityAffectedBody body)
+        {
+            for (int i = 0; i < MAX_TRACKED_BODIES; i++)
+            {
+                if (trackedBodies[i] == null)
+                {
+                    trackedBodies[i] = body;
+                    bodyTimeInBand[i] = 0f;
+                    trackedBodyCount++;
+                    return;
+                }
+            }
+        }
+
+        private void UntrackBody(GravityAffectedBody body)
+        {
+            for (int i = 0; i < MAX_TRACKED_BODIES; i++)
+            {
+                if (trackedBodies[i] == body)
+                {
+                    trackedBodies[i] = null;
+                    bodyTimeInBand[i] = 0f;
+                    trackedBodyCount--;
+                    return;
+                }
+            }
+        }
+
+        private int GetTrackedIndex(GravityAffectedBody body)
+        {
+            for (int i = 0; i < MAX_TRACKED_BODIES; i++)
+            {
+                if (trackedBodies[i] == body)
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        private void ApplyFloatBandPhysics(GravityAffectedBody body, float floatFactor)
+        {
+            Rigidbody rb = body.Rigidbody;
+            if (rb == null) return;
+
+            rb.linearVelocity *= velocityDamping;
+
+            float oscillation = Mathf.Sin(Time.time * floatOscillationFrequency * Mathf.PI * 2f) 
+                              * floatOscillationAmplitude;
+            
+            Vector3 up = -body.CurrentGravityDirection;
+            rb.AddForce(up * oscillation, ForceMode.Acceleration);
+
+            if (rb.linearVelocity.magnitude > 0.1f)
+            {
+                rb.AddForce(-rb.linearVelocity * dampingStrength, ForceMode.Acceleration);
+            }
+        }
+
+        private void ApplyTransitionPhysics(GravityAffectedBody body, float floatFactor)
+        {
+            Rigidbody rb = body.Rigidbody;
+            if (rb == null) return;
+
+            float transitionDamping = Mathf.Lerp(1f, velocityDamping, floatFactor);
+            rb.linearVelocity *= transitionDamping;
         }
 
         private float GetAltitudeAboveRing(Vector3 position)
         {
             if (GravitySystem.Instance == null) return 0f;
-            return GravitySystem.Instance.GetDistanceFromRingSurface(position);
+            return GravitySystem.Instance.GetAltitude(position);
         }
 
         private float CalculateFloatFactor(float altitude)
         {
             float lowerBound = bandAltitude - transitionZone;
             float upperBound = bandAltitude + bandHeight + transitionZone;
-            float bandStart = bandAltitude;
-            float bandEnd = bandAltitude + bandHeight;
+            float coreUpper = bandAltitude + bandHeight;
 
             if (altitude < lowerBound || altitude > upperBound)
+            {
                 return 0f;
+            }
 
-            if (altitude >= bandStart && altitude <= bandEnd)
+            if (altitude >= bandAltitude && altitude <= coreUpper)
+            {
                 return 1f;
+            }
 
-            if (altitude < bandStart)
-                return Mathf.InverseLerp(lowerBound, bandStart, altitude);
+            if (altitude < bandAltitude)
+            {
+                return Mathf.InverseLerp(lowerBound, bandAltitude, altitude);
+            }
             else
-                return Mathf.InverseLerp(upperBound, bandEnd, altitude);
+            {
+                return Mathf.InverseLerp(upperBound, coreUpper, altitude);
+            }
         }
 
-        private void ApplyFloatDamping(GravityAffectedBody body)
+        /// <summary>
+        /// Check if a position is within the float band.
+        /// </summary>
+        public bool IsInFloatBand(Vector3 position)
         {
-            Vector3 velocity = body.Rigidbody.velocity;
-            Vector3 dampingForce = -velocity * dampingStrength;
-            body.Rigidbody.AddForce(dampingForce, ForceMode.Acceleration);
+            float altitude = GetAltitudeAboveRing(position);
+            return CalculateFloatFactor(altitude) > 0f;
         }
 
-        private void ApplyFloatOscillation(GravityAffectedBody body, float floatFactor)
+        /// <summary>
+        /// Get the float factor at a specific position.
+        /// </summary>
+        public float GetFloatFactorAt(Vector3 position)
         {
-            float oscillation = Mathf.Sin(Time.time * floatOscillationFrequency + body.GetInstanceID()) 
-                              * floatOscillationAmplitude * floatFactor;
-            
-            Vector3 gravityDir = GravitySystem.Instance.CalculateGravityDirection(body.transform.position);
-            body.Rigidbody.AddForce(-gravityDir * oscillation, ForceMode.Acceleration);
+            float altitude = GetAltitudeAboveRing(position);
+            return CalculateFloatFactor(altitude);
         }
 
-        private bool IsInFloatBand(GravityAffectedBody body)
-        {
-            return body.gameObject.GetComponent<FloatBandMarker>() != null;
-        }
-
-        private void SetInFloatBand(GravityAffectedBody body, bool inBand)
-        {
-            var marker = body.gameObject.GetComponent<FloatBandMarker>();
-            if (inBand && marker == null)
-                body.gameObject.AddComponent<FloatBandMarker>();
-            else if (!inBand && marker != null)
-                Destroy(marker);
-        }
-
+#if UNITY_EDITOR
         private void OnDrawGizmos()
         {
             if (!showDebugGizmos) return;
+            if (GravitySystem.Instance == null && !Application.isPlaying) return;
 
-            Gizmos.color = bandColor;
-            
-            Vector3 center = GravitySystem.Instance?.RingCenter ?? Vector3.zero;
-            float radius = GravitySystem.Instance?.RingRadius ?? 100f;
+            float radius = 100f;
+            Vector3 center = Vector3.zero;
+            Vector3 axis = Vector3.up;
 
-            DrawBandVisualization(center, radius);
-        }
+            if (GravitySystem.Instance != null)
+            {
+                radius = GravitySystem.Instance.RingRadius;
+                center = GravitySystem.Instance.RingCenter;
+                axis = GravitySystem.Instance.RingAxis;
+            }
 
-        private void DrawBandVisualization(Vector3 center, float radius)
-        {
-            int segments = 32;
             float innerRadius = radius + bandAltitude;
             float outerRadius = radius + bandAltitude + bandHeight;
+            float transitionInner = radius + bandAltitude - transitionZone;
+            float transitionOuter = radius + bandAltitude + bandHeight + transitionZone;
 
-            for (int i = 0; i < segments; i++)
+            Gizmos.color = bandColor;
+            DrawRingGizmo(center, axis, innerRadius, 48);
+            DrawRingGizmo(center, axis, outerRadius, 48);
+
+            Gizmos.color = transitionColor;
+            DrawRingGizmo(center, axis, transitionInner, 32);
+            DrawRingGizmo(center, axis, transitionOuter, 32);
+        }
+
+        private void DrawRingGizmo(Vector3 center, Vector3 axis, float radius, int segments)
+        {
+            Vector3 referenceRight = Vector3.Cross(axis, Vector3.forward);
+            if (referenceRight.sqrMagnitude < 0.001f)
             {
-                float angle1 = (i / (float)segments) * 360f;
-                float angle2 = ((i + 1) / (float)segments) * 360f;
+                referenceRight = Vector3.Cross(axis, Vector3.right);
+            }
+            referenceRight.Normalize();
 
-                Vector3 inner1 = center + Quaternion.Euler(0, angle1, 0) * Vector3.right * innerRadius;
-                Vector3 inner2 = center + Quaternion.Euler(0, angle2, 0) * Vector3.right * innerRadius;
-                Vector3 outer1 = center + Quaternion.Euler(0, angle1, 0) * Vector3.right * outerRadius;
-                Vector3 outer2 = center + Quaternion.Euler(0, angle2, 0) * Vector3.right * outerRadius;
-
-                Gizmos.DrawLine(inner1, inner2);
-                Gizmos.DrawLine(outer1, outer2);
-                Gizmos.DrawLine(inner1, outer1);
+            Vector3 lastPoint = center + referenceRight * radius;
+            
+            for (int i = 1; i <= segments; i++)
+            {
+                float angle = (i / (float)segments) * 360f;
+                Vector3 point = center + Quaternion.AngleAxis(angle, axis) * (referenceRight * radius);
+                Gizmos.DrawLine(lastPoint, point);
+                lastPoint = point;
             }
         }
+#endif
     }
-
-    /// <summary>
-    /// Marker component to track objects currently in the float band.
-    /// </summary>
-    public class FloatBandMarker : MonoBehaviour { }
 }
