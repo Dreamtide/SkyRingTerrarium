@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using SkyRingTerrarium.Core;
 
 namespace SkyRingTerrarium.UI
 {
@@ -23,7 +24,7 @@ namespace SkyRingTerrarium.UI
         [SerializeField] private TextMeshProUGUI currencyDisplayText;
 
         // Cached upgrade cards
-        private Dictionary<UpgradeType, UpgradeCard> upgradeCards;
+        private Dictionary<UpgradeManager.UpgradeType, UpgradeCard> upgradeCards;
 
         // Events
         public event Action OnMenuOpened;
@@ -34,7 +35,7 @@ namespace SkyRingTerrarium.UI
 
         private void Awake()
         {
-            upgradeCards = new Dictionary<UpgradeType, UpgradeCard>();
+            upgradeCards = new Dictionary<UpgradeManager.UpgradeType, UpgradeCard>();
         }
 
         private void Start()
@@ -106,18 +107,18 @@ namespace SkyRingTerrarium.UI
 
         private void CreateUpgradeCards()
         {
-            foreach (UpgradeType type in Enum.GetValues(typeof(UpgradeType)))
+            foreach (UpgradeManager.UpgradeType type in Enum.GetValues(typeof(UpgradeManager.UpgradeType)))
             {
                 CreateCard(type);
             }
         }
 
-        private void CreateCard(UpgradeType type)
+        private void CreateCard(UpgradeManager.UpgradeType type)
         {
             UpgradeManager upgradeManager = UpgradeManager.Instance;
             if (upgradeManager == null) return;
 
-            UpgradeDefinition definition = upgradeManager.GetUpgradeDefinition(type);
+            UpgradeManager.UpgradeDefinition definition = upgradeManager.GetUpgradeDefinition(type);
             if (definition == null) return;
 
             // Create card
@@ -144,7 +145,7 @@ namespace SkyRingTerrarium.UI
             upgradeCards[type] = card;
         }
 
-        private GameObject CreateCardProgrammatically(UpgradeType type)
+        private GameObject CreateCardProgrammatically(UpgradeManager.UpgradeType type)
         {
             // Create a basic card layout when no prefab is assigned
             GameObject card = new GameObject($"UpgradeCard_{type}");
@@ -175,7 +176,7 @@ namespace SkyRingTerrarium.UI
             }
         }
 
-        private void RefreshCard(UpgradeType type)
+        private void RefreshCard(UpgradeManager.UpgradeType type)
         {
             if (!upgradeCards.TryGetValue(type, out UpgradeCard card)) return;
 
@@ -195,7 +196,7 @@ namespace SkyRingTerrarium.UI
 
         #region Purchase
 
-        private void TryPurchaseUpgrade(UpgradeType type)
+        private void TryPurchaseUpgrade(UpgradeManager.UpgradeType type)
         {
             UpgradeManager upgradeManager = UpgradeManager.Instance;
             if (upgradeManager == null) return;
@@ -211,7 +212,7 @@ namespace SkyRingTerrarium.UI
             }
         }
 
-        private void OnUpgradePurchased(UpgradeType type, int newLevel)
+        private void OnUpgradePurchased(UpgradeManager.UpgradeType type, int newLevel)
         {
             RefreshAllCards(); // Refresh all because affordability may have changed
         }
@@ -258,10 +259,10 @@ namespace SkyRingTerrarium.UI
         // Events
         public event Action OnPurchaseClicked;
 
-        private UpgradeType upgradeType;
-        private UpgradeDefinition definition;
+        private UpgradeManager.UpgradeType upgradeType;
+        private UpgradeManager.UpgradeDefinition definition;
 
-        public void Initialize(UpgradeType type, UpgradeDefinition def)
+        public void Initialize(UpgradeManager.UpgradeType type, UpgradeManager.UpgradeDefinition def)
         {
             upgradeType = type;
             definition = def;
