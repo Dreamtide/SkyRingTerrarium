@@ -1,9 +1,7 @@
 {
     "name": "SkyRingTerrarium.Editor",
     "rootNamespace": "SkyRingTerrarium.Editor",
-    "references": [
-        "SkyRingTerrarium"
-    ],
+    "references": [],
     "includePlatforms": [
         "Editor"
     ],
