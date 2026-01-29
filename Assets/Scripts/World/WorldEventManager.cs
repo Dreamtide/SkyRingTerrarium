@@ -37,54 +37,34 @@ namespace SkyRingTerrarium.World
         [SerializeField] private float minTimeBetweenEvents = 180f;
         [SerializeField] private int maxConcurrentEvents = 2;
 
-        [Header("Meteor Shower")]
-        [SerializeField] private float meteorShowerChance = 0.05f;
+        [Header("Event Probabilities")]
+        [SerializeField] private float meteorShowerChance = 0.1f;
+        [SerializeField] private float auroraWaveChance = 0.15f;
+        [SerializeField] private float migrationChance = 0.08f;
+        [SerializeField] private float bloomChance = 0.12f;
+        [SerializeField] private float solarFlareChance = 0.05f;
+        [SerializeField] private float cosmicDriftChance = 0.03f;
+        [SerializeField] private float harmonicResonanceChance = 0.02f;
+
+        [Header("Event Durations")]
         [SerializeField] private float meteorShowerDuration = 60f;
-        [SerializeField] private float meteorSpawnInterval = 2f;
-        [SerializeField] private GameObject meteorPrefab;
-        [SerializeField] private GameObject specialResourcePrefab;
-
-        [Header("Aurora Wave")]
-        [SerializeField] private float auroraWaveChance = 0.08f;
-        [SerializeField] private float auroraWaveDuration = 90f;
-        [SerializeField] private float auroraCreatureBoost = 1.5f;
-
-        [Header("Bloom Event")]
-        [SerializeField] private float bloomChance = 0.1f;
-        [SerializeField] private float bloomDuration = 120f;
-
-        [Header("Solar Flare")]
-        [SerializeField] private float solarFlareChance = 0.03f;
+        [SerializeField] private float auroraWaveDuration = 120f;
+        [SerializeField] private float migrationDuration = 300f;
+        [SerializeField] private float bloomDuration = 180f;
         [SerializeField] private float solarFlareDuration = 30f;
-        [SerializeField] private float solarFlareIntensityBoost = 2f;
+        [SerializeField] private float cosmicDriftDuration = 240f;
+        [SerializeField] private float harmonicResonanceDuration = 90f;
 
-        [Header("Cosmic Drift")]
-        [SerializeField] private float cosmicDriftChance = 0.02f;
-        [SerializeField] private float cosmicDriftDuration = 45f;
-
-        [Header("Harmonic Resonance")]
-        [SerializeField] private float harmonicResonanceChance = 0.01f;
-        [SerializeField] private float harmonicResonanceDuration = 60f;
-
-        [Header("Condition Requirements")]
-        [SerializeField] private bool meteorRequiresNight = true;
-        [SerializeField] private bool auroraRequiresClear = true;
+        [Header("Debug")]
+        [SerializeField] private bool debugMode = false;
         #endregion
 
-        #region Public Properties
-        public List<WorldEvent> ActiveEvents => activeEvents;
-        public bool HasActiveEvent => activeEvents.Count > 0;
-        public WorldEvent CurrentMainEvent => activeEvents.Count > 0 ? activeEvents[0] : null;
-        #endregion
-
-        #region Private Fields
         private List<WorldEvent> activeEvents = new List<WorldEvent>();
-        private float eventCheckTimer;
-        private float lastEventTime;
-        private float meteorSpawnTimer;
-        #endregion
+        private float lastEventCheckTime;
+        private float lastEventEndTime;
 
-        #region Unity Lifecycle
+        public IReadOnlyList<WorldEvent> ActiveEvents => activeEvents;
+
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -95,114 +75,124 @@ namespace SkyRingTerrarium.World
             Instance = this;
         }
 
-        private void Start()
-        {
-            WorldTimeManager.OnTimeOfDayPhaseChanged += OnTimePhaseChanged;
-            WeatherSystem.OnWeatherChanged += OnWeatherChanged;
-            WorldTimeManager.OnSeasonChanged += OnSeasonChanged;
-        }
-
         private void OnDestroy()
         {
-            WorldTimeManager.OnTimeOfDayPhaseChanged -= OnTimePhaseChanged;
-            WeatherSystem.OnWeatherChanged -= OnWeatherChanged;
-            WorldTimeManager.OnSeasonChanged -= OnSeasonChanged;
+            if (Instance == this)
+            {
+                Instance = null;
+            }
         }
 
         private void Update()
         {
-            UpdateEventCheck();
             UpdateActiveEvents();
+            CheckForNewEvents();
         }
-        #endregion
 
-        #region Event Checking
-        private void UpdateEventCheck()
+        private void UpdateActiveEvents()
         {
-            eventCheckTimer += Time.deltaTime;
-            if (eventCheckTimer < eventCheckInterval) return;
-            eventCheckTimer = 0f;
+            for (int i = activeEvents.Count - 1; i >= 0; i--)
+            {
+                WorldEvent evt = activeEvents[i];
+                evt.ElapsedTime += Time.deltaTime;
+                activeEvents[i] = evt;
 
-            if (Time.time - lastEventTime < minTimeBetweenEvents) return;
+                if (evt.ElapsedTime >= evt.Duration)
+                {
+                    EndEvent(i);
+                }
+                else
+                {
+                    UpdateEventEffects(evt);
+                }
+            }
+        }
+
+        private void CheckForNewEvents()
+        {
+            if (Time.time - lastEventCheckTime < eventCheckInterval) return;
+            if (Time.time - lastEventEndTime < minTimeBetweenEvents) return;
             if (activeEvents.Count >= maxConcurrentEvents) return;
 
-            TryTriggerRandomEvent();
+            lastEventCheckTime = Time.time;
+            TryStartRandomEvent();
         }
 
-        private void TryTriggerRandomEvent()
+        private void TryStartRandomEvent()
         {
-            // Check each event type
-            if (CanTriggerMeteorShower() && UnityEngine.Random.value < meteorShowerChance)
+            float roll = UnityEngine.Random.value;
+            float cumulative = 0f;
+
+            var eventChances = new (WorldEventType type, float chance)[]
             {
-                TriggerEvent(WorldEventType.MeteorShower);
-                return;
-            }
-
-            if (CanTriggerAurora() && UnityEngine.Random.value < auroraWaveChance)
-            {
-                TriggerEvent(WorldEventType.AuroraWave);
-                return;
-            }
-
-            if (UnityEngine.Random.value < bloomChance)
-            {
-                TriggerEvent(WorldEventType.Bloom);
-                return;
-            }
-
-            if (UnityEngine.Random.value < solarFlareChance)
-            {
-                TriggerEvent(WorldEventType.SolarFlare);
-                return;
-            }
-
-            if (UnityEngine.Random.value < cosmicDriftChance)
-            {
-                TriggerEvent(WorldEventType.CosmicDrift);
-                return;
-            }
-
-            if (UnityEngine.Random.value < harmonicResonanceChance)
-            {
-                TriggerEvent(WorldEventType.HarmonicResonance);
-                return;
-            }
-        }
-
-        private bool CanTriggerMeteorShower()
-        {
-            if (!meteorRequiresNight) return true;
-            if (WorldTimeManager.Instance == null) return true;
-            return WorldTimeManager.Instance.IsNight;
-        }
-
-        private bool CanTriggerAurora()
-        {
-            if (!auroraRequiresClear) return true;
-            if (WeatherSystem.Instance == null) return true;
-            return WeatherSystem.Instance.CurrentWeather == WeatherSystem.WeatherState.Clear ||
-                   WeatherSystem.Instance.CurrentWeather == WeatherSystem.WeatherState.Calm;
-        }
-        #endregion
-
-        #region Event Triggering
-        public void TriggerEvent(WorldEventType eventType)
-        {
-            float duration = GetEventDuration(eventType);
-            
-            var worldEvent = new WorldEvent
-            {
-                type = eventType,
-                startTime = Time.time,
-                duration = duration,
-                remainingTime = duration
+                (WorldEventType.MeteorShower, meteorShowerChance),
+                (WorldEventType.AuroraWave, auroraWaveChance),
+                (WorldEventType.Migration, migrationChance),
+                (WorldEventType.Bloom, bloomChance),
+                (WorldEventType.SolarFlare, solarFlareChance),
+                (WorldEventType.CosmicDrift, cosmicDriftChance),
+                (WorldEventType.HarmonicResonance, harmonicResonanceChance)
             };
 
-            activeEvents.Add(worldEvent);
-            lastEventTime = Time.time;
+            foreach (var (type, chance) in eventChances)
+            {
+                cumulative += chance;
+                if (roll < cumulative && !IsEventTypeActive(type))
+                {
+                    StartEvent(type);
+                    break;
+                }
+            }
+        }
 
-            OnEventStart(worldEvent);
-            OnEventStarted?.Invoke(worldEvent);
+        private bool IsEventTypeActive(WorldEventType type)
+        {
+            foreach (var evt in activeEvents)
+            {
+                if (evt.Type == type) return true;
+            }
+            return false;
+        }
+
+        public void StartEvent(WorldEventType type)
+        {
+            float duration = GetEventDuration(type);
+            WorldEvent newEvent = new WorldEvent
+            {
+                Type = type,
+                Duration = duration,
+                ElapsedTime = 0f,
+                Intensity = 1f,
+                Position = GetEventPosition(type)
+            };
+
+            activeEvents.Add(newEvent);
+            OnEventStarted?.Invoke(newEvent);
+
+            if (debugMode)
+            {
+                Debug.Log($"[WorldEvent] Started: {type} (Duration: {duration:F1}s)");
+            }
+
+            InitializeEventEffects(newEvent);
+        }
+
+        private void EndEvent(int index)
+        {
+            if (index < 0 || index >= activeEvents.Count) return;
+
+            WorldEvent evt = activeEvents[index];
+            activeEvents.RemoveAt(index);
+            lastEventEndTime = Time.time;
+
+            OnEventEnded?.Invoke(evt);
+
+            if (debugMode)
+            {
+                Debug.Log($"[WorldEvent] Ended: {evt.Type}");
+            }
+
+            CleanupEventEffects(evt);
         }
 
         private float GetEventDuration(WorldEventType type)
@@ -211,6 +201,7 @@ namespace SkyRingTerrarium.World
             {
                 WorldEventType.MeteorShower => meteorShowerDuration,
                 WorldEventType.AuroraWave => auroraWaveDuration,
+                WorldEventType.Migration => migrationDuration,
                 WorldEventType.Bloom => bloomDuration,
                 WorldEventType.SolarFlare => solarFlareDuration,
                 WorldEventType.CosmicDrift => cosmicDriftDuration,
@@ -219,185 +210,104 @@ namespace SkyRingTerrarium.World
             };
         }
 
-        private void OnEventStart(WorldEvent worldEvent)
+        private Vector3 GetEventPosition(WorldEventType type)
         {
-            switch (worldEvent.type)
+            // Events can occur at random positions around the ring
+            float angle = UnityEngine.Random.Range(0f, 360f) * Mathf.Deg2Rad;
+            float radius = 100f; // Assume standard ring radius
+            return new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius);
+        }
+
+        private void InitializeEventEffects(WorldEvent evt)
+        {
+            switch (evt.Type)
             {
                 case WorldEventType.MeteorShower:
-                    meteorSpawnTimer = 0f;
+                    // Start spawning meteors
                     break;
-                    
                 case WorldEventType.AuroraWave:
-                    StarFieldSystem.Instance?.TriggerAurora();
                     OnAuroraWave?.Invoke();
                     break;
-                    
-                case WorldEventType.Bloom:
-                    Ecosystem.ResourceManager.Instance?.TriggerBloom();
-                    break;
-                    
                 case WorldEventType.Migration:
-                    Ecosystem.EcosystemManager.Instance?.StartMigration();
+                    // Trigger creature migration
                     break;
-            }
-        }
-        #endregion
-
-        #region Event Updates
-        private void UpdateActiveEvents()
-        {
-            for (int i = activeEvents.Count - 1; i >= 0; i--)
-            {
-                var worldEvent = activeEvents[i];
-                worldEvent.remainingTime -= Time.deltaTime;
-
-                UpdateEvent(worldEvent);
-
-                if (worldEvent.remainingTime <= 0)
-                {
-                    EndEvent(worldEvent);
-                    activeEvents.RemoveAt(i);
-                }
-                else
-                {
-                    activeEvents[i] = worldEvent;
-                }
-            }
-        }
-
-        private void UpdateEvent(WorldEvent worldEvent)
-        {
-            switch (worldEvent.type)
-            {
-                case WorldEventType.MeteorShower:
-                    UpdateMeteorShower();
+                case WorldEventType.Bloom:
+                    // Start flora bloom effects
+                    break;
+                case WorldEventType.SolarFlare:
+                    // Increase lighting intensity
+                    break;
+                case WorldEventType.CosmicDrift:
+                    // Modify gravity slightly
+                    break;
+                case WorldEventType.HarmonicResonance:
+                    // Create harmonic effects
                     break;
             }
         }
 
-        private void UpdateMeteorShower()
+        private void UpdateEventEffects(WorldEvent evt)
         {
-            meteorSpawnTimer += Time.deltaTime;
-            if (meteorSpawnTimer >= meteorSpawnInterval)
-            {
-                meteorSpawnTimer = 0f;
-                SpawnMeteor();
-            }
-        }
-
-        private void SpawnMeteor()
-        {
-            float angle = UnityEngine.Random.Range(0f, 360f) * Mathf.Deg2Rad;
-            float spawnRadius = 30f;
-            Vector2 spawnPos = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * spawnRadius;
-
-            if (meteorPrefab != null)
-            {
-                var meteor = Instantiate(meteorPrefab, spawnPos, Quaternion.identity);
-                var meteorScript = meteor.GetComponent<Meteor>();
-                if (meteorScript != null)
-                {
-                    meteorScript.Initialize(-spawnPos.normalized, OnMeteorLanded);
-                }
-            }
-        }
-
-        private void OnMeteorLanded(Vector2 impactPosition)
-        {
-            OnMeteorImpact?.Invoke(impactPosition);
+            float progress = evt.ElapsedTime / evt.Duration;
             
-            // Chance to spawn special resource
-            if (specialResourcePrefab != null && UnityEngine.Random.value < 0.3f)
+            // Intensity ramps up then down
+            float intensity = progress < 0.2f ? progress / 0.2f :
+                             progress > 0.8f ? (1f - progress) / 0.2f : 1f;
+
+            if (evt.Type == WorldEventType.MeteorShower && UnityEngine.Random.value < 0.02f * intensity)
             {
-                Instantiate(specialResourcePrefab, impactPosition, Quaternion.identity);
+                Vector2 impactPos = new Vector2(
+                    evt.Position.x + UnityEngine.Random.Range(-50f, 50f),
+                    evt.Position.z + UnityEngine.Random.Range(-50f, 50f)
+                );
+                OnMeteorImpact?.Invoke(impactPos);
             }
         }
 
-        private void EndEvent(WorldEvent worldEvent)
+        private void CleanupEventEffects(WorldEvent evt)
         {
-            switch (worldEvent.type)
-            {
-                case WorldEventType.AuroraWave:
-                    StarFieldSystem.Instance?.StopAurora();
-                    break;
-            }
-
-            OnEventEnded?.Invoke(worldEvent);
+            // Clean up any event-specific effects
         }
-        #endregion
 
-        #region Condition Responses
-        private void OnTimePhaseChanged(WorldTimeManager.TimeOfDay phase)
+        // Public API
+        public void ForceStartEvent(WorldEventType type)
         {
-            // Night-specific event chances
-            if (phase == WorldTimeManager.TimeOfDay.Night)
+            if (!IsEventTypeActive(type))
             {
-                if (UnityEngine.Random.value < meteorShowerChance * 0.5f)
-                {
-                    TriggerEvent(WorldEventType.MeteorShower);
-                }
+                StartEvent(type);
             }
         }
 
-        private void OnWeatherChanged(WeatherSystem.WeatherState weather)
+        public void ForceEndAllEvents()
         {
-            // Clear weather after storm can trigger aurora
-            if (weather == WeatherSystem.WeatherState.Clear && WorldTimeManager.Instance?.IsNight == true)
+            while (activeEvents.Count > 0)
             {
-                if (UnityEngine.Random.value < auroraWaveChance)
-                {
-                    TriggerEvent(WorldEventType.AuroraWave);
-                }
+                EndEvent(0);
             }
         }
 
-        private void OnSeasonChanged(WorldTimeManager.Season season)
+        public WorldEvent? GetActiveEvent(WorldEventType type)
         {
-            // Seasonal event triggers
-            if (season == WorldTimeManager.Season.Spring)
+            foreach (var evt in activeEvents)
             {
-                if (UnityEngine.Random.value < bloomChance * 2f)
-                {
-                    TriggerEvent(WorldEventType.Bloom);
-                }
+                if (evt.Type == type) return evt;
             }
+            return null;
         }
-        #endregion
-
-        #region Public Query Methods
-        public bool IsEventActive(WorldEventType type)
-        {
-            return activeEvents.Exists(e => e.type == type);
-        }
-
-        public float GetEventProgress(WorldEventType type)
-        {
-            var worldEvent = activeEvents.Find(e => e.type == type);
-            if (worldEvent.duration > 0)
-            {
-                return 1f - (worldEvent.remainingTime / worldEvent.duration);
-            }
-            return 0f;
-        }
-
-        public float GetAuroraBoostMultiplier()
-        {
-            return IsEventActive(WorldEventType.AuroraWave) ? auroraCreatureBoost : 1f;
-        }
-
-        public float GetSolarFlareIntensity()
-        {
-            return IsEventActive(WorldEventType.SolarFlare) ? solarFlareIntensityBoost : 1f;
-        }
-        #endregion
     }
 
-    [System.Serializable]
+    /// <summary>
+    /// Represents an active world event
+    /// </summary>
     public struct WorldEvent
     {
-        public WorldEventManager.WorldEventType type;
-        public float startTime;
-        public float duration;
-        public float remainingTime;
+        public WorldEventManager.WorldEventType Type;
+        public float Duration;
+        public float ElapsedTime;
+        public float Intensity;
+        public Vector3 Position;
+
+        public float Progress => Duration > 0 ? ElapsedTime / Duration : 0f;
+        public float RemainingTime => Mathf.Max(0f, Duration - ElapsedTime);
     }
 }
