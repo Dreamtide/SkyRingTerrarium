@@ -1,4 +1,5 @@
 using System;
+using SkyRingTerrarium.World;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Audio;
@@ -319,7 +320,7 @@ namespace SkyRingTerrarium.Core
         {
             if (Mathf.Abs(currentMusicIntensity - targetMusicIntensity) > 0.01f)
             {
-                currentMusicIntensity = Mathf.Lerp(currentMusicIntensity, targetMusicIntensity, 
+                currentMusicIntensity = Mathf.Lerp(currentMusicIntensity, targetMusicIntensity,
                     Time.deltaTime * musicIntensityLerpSpeed);
                 OnMusicIntensityChanged?.Invoke(currentMusicIntensity);
 
@@ -340,27 +341,27 @@ namespace SkyRingTerrarium.Core
             SetMusicIntensity(isDay ? 0.3f : 0.1f);
         }
 
-        private void HandleWeatherChange(WeatherType weather)
+        private void HandleWeatherChange(WeatherSystem.WeatherState weather)
         {
             string weatherSound = weather switch
             {
-                WeatherType.Clear => null,
-                WeatherType.Windy => "weather_wind",
-                WeatherType.Stormy => "weather_storm",
-                WeatherType.MoteShower => "weather_motes",
-                WeatherType.AuroraWind => "weather_aurora",
+                WeatherSystem.WeatherState.Clear => null,
+                WeatherSystem.WeatherState.Windy => "weather_wind",
+                WeatherSystem.WeatherState.Stormy => "weather_storm",
+                WeatherSystem.WeatherState.Misty => "weather_motes",
+                WeatherSystem.WeatherState.Calm => "weather_aurora",
                 _ => null
             };
             SetWeatherLoop(weatherSound);
         }
 
-        private void HandleEventStarted(WorldEventType eventType)
+        private void HandleEventStarted(WorldEventManager.WorldEventType eventType)
         {
             PlayEventSound(eventType.ToString(), true);
             SetMusicIntensity(0.8f);
         }
 
-        private void HandleEventEnded(WorldEventType eventType)
+        private void HandleEventEnded(WorldEventManager.WorldEventType eventType)
         {
             PlayEventSound(eventType.ToString(), false);
             SetMusicIntensity(0.3f);
