@@ -8,7 +8,7 @@
                 {
                     "name": "Move",
                     "type": "Value",
-                    "id": "move-action-id",
+                    "id": "72fa4e51-e3f1-411b-853f-8323fa3c3192",
                     "expectedControlType": "Vector2",
                     "processors": "",
                     "interactions": "",
@@ -17,7 +17,7 @@
                 {
                     "name": "Jump",
                     "type": "Button",
-                    "id": "jump-action-id",
+                    "id": "cea3707a-88af-4840-99c1-fc4a8acdaea9",
                     "expectedControlType": "Button",
                     "processors": "",
                     "interactions": "",
@@ -26,7 +26,7 @@
                 {
                     "name": "Thrust",
                     "type": "Button",
-                    "id": "thrust-action-id",
+                    "id": "dfd2ac7b-4f56-4cdb-b10f-ff075bbad40b",
                     "expectedControlType": "Button",
                     "processors": "",
                     "interactions": "",
@@ -35,7 +35,7 @@
                 {
                     "name": "Flip",
                     "type": "Button",
-                    "id": "flip-action-id",
+                    "id": "703f8ed3-639b-4b3b-910c-27e7ae00edbb",
                     "expectedControlType": "Button",
                     "processors": "",
                     "interactions": "",
@@ -44,7 +44,7 @@
                 {
                     "name": "Run",
                     "type": "Button",
-                    "id": "run-action-id",
+                    "id": "2ffe7808-96df-4b89-88b4-03ed0ff2a40e",
                     "expectedControlType": "Button",
                     "processors": "",
                     "interactions": "",
@@ -54,7 +54,7 @@
             "bindings": [
                 {
                     "name": "WASD",
-                    "id": "wasd-binding",
+                    "id": "0636bdf1-a69d-481d-8697-8f940e5c75dc",
                     "path": "2DVector",
                     "interactions": "",
                     "processors": "",
@@ -65,7 +65,7 @@
                 },
                 {
                     "name": "up",
-                    "id": "wasd-up",
+                    "id": "4915cf6a-ae0c-41df-852a-027c51fd4b93",
                     "path": "<Keyboard>/w",
                     "interactions": "",
                     "processors": "",
@@ -76,7 +76,7 @@
                 },
                 {
                     "name": "down",
-                    "id": "wasd-down",
+                    "id": "f622307d-8e60-44f7-879e-52dbad406529",
                     "path": "<Keyboard>/s",
                     "interactions": "",
                     "processors": "",
@@ -87,7 +87,7 @@
                 },
                 {
                     "name": "left",
-                    "id": "wasd-left",
+                    "id": "682ad226-1b74-4682-b42f-381dc76db655",
                     "path": "<Keyboard>/a",
                     "interactions": "",
                     "processors": "",
@@ -98,7 +98,7 @@
                 },
                 {
                     "name": "right",
-                    "id": "wasd-right",
+                    "id": "14a51984-2dff-4a86-ac62-6a2538b3929e",
                     "path": "<Keyboard>/d",
                     "interactions": "",
                     "processors": "",
@@ -109,7 +109,7 @@
                 },
                 {
                     "name": "",
-                    "id": "jump-space",
+                    "id": "23c56d10-cad0-4f1b-b521-0b962400d794",
                     "path": "<Keyboard>/space",
                     "interactions": "",
                     "processors": "",
@@ -120,7 +120,7 @@
                 },
                 {
                     "name": "",
-                    "id": "thrust-shift",
+                    "id": "15a142fb-5013-4266-bbcc-3dc7b8c7c78f",
                     "path": "<Keyboard>/leftShift",
                     "interactions": "",
                     "processors": "",
@@ -131,7 +131,7 @@
                 },
                 {
                     "name": "",
-                    "id": "flip-f",
+                    "id": "dba3f3dd-e8fe-4719-be6e-273a1f82325a",
                     "path": "<Keyboard>/f",
                     "interactions": "",
                     "processors": "",
@@ -142,7 +142,7 @@
                 },
                 {
                     "name": "",
-                    "id": "run-ctrl",
+                    "id": "d9e0495e-267a-4938-abdb-162c16cf4111",
                     "path": "<Keyboard>/leftCtrl",
                     "interactions": "",
                     "processors": "",
@@ -157,7 +157,7 @@
     "controlSchemes": [
         {
             "name": "Keyboard",
-            "bindingGroup": "Keyboard",
+            "bindingGroup": "af0ecc0b-49a9-4394-a7cf-095843c78938",
             "devices": [
                 {
                     "devicePath": "<Keyboard>",
