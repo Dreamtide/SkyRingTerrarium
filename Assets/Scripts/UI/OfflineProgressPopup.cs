@@ -45,11 +45,8 @@ namespace SkyRingTerrarium.UI
             }
 
             // Subscribe to offline progress manager
-            OfflineProgressionManager offlineMgr = FindFirstObjectByType<OfflineProgressionManager>();
-            if (offlineMgr != null)
-            {
-                offlineMgr.OnOfflineProgressionComplete += ShowReport;
-            }
+            // Subscribe to static offline progress event
+            OfflineProgressionManager.OnOfflineProgressionComplete += ShowReport;
 
             // Start hidden
             Hide();
@@ -247,11 +244,8 @@ namespace SkyRingTerrarium.UI
 
         private void OnDestroy()
         {
-            OfflineProgressionManager offlineMgr = FindFirstObjectByType<OfflineProgressionManager>();
-            if (offlineMgr != null)
-            {
-                offlineMgr.OnOfflineProgressionComplete -= ShowReport;
-            }
+            // Unsubscribe from static offline progress event
+            OfflineProgressionManager.OnOfflineProgressionComplete -= ShowReport;
         }
     }
 }
