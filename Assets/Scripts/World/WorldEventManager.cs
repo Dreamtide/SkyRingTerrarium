@@ -50,20 +50,23 @@ namespace SkyRingTerrarium.World
         [SerializeField] private float meteorShowerDuration = 60f;
         [SerializeField] private float auroraWaveDuration = 120f;
         [SerializeField] private float migrationDuration = 300f;
-        [SerializeField] private float bloomDuration = 180f;
+        [SerializeField] private float bloomDuration = 240f;
         [SerializeField] private float solarFlareDuration = 30f;
-        [SerializeField] private float cosmicDriftDuration = 240f;
+        [SerializeField] private float cosmicDriftDuration = 180f;
         [SerializeField] private float harmonicResonanceDuration = 90f;
-
-        [Header("Debug")]
-        [SerializeField] private bool debugMode = false;
         #endregion
 
+        #region Private Fields
         private List<WorldEvent> activeEvents = new List<WorldEvent>();
-        private float lastEventCheckTime;
+        private float nextEventCheckTime;
         private float lastEventEndTime;
+        private System.Random eventRandom;
+        #endregion
 
+        #region Public Properties
         public IReadOnlyList<WorldEvent> ActiveEvents => activeEvents;
+        public int ActiveEventCount => activeEvents.Count;
+        #endregion
 
         private void Awake()
         {
@@ -73,6 +76,7 @@ namespace SkyRingTerrarium.World
                 return;
             }
             Instance = this;
+            eventRandom = new System.Random();
         }
 
         private void OnDestroy()
@@ -83,121 +87,103 @@ namespace SkyRingTerrarium.World
             }
         }
 
+        private void Start()
+        {
+            nextEventCheckTime = Time.time + eventCheckInterval;
+        }
+
         private void Update()
         {
             UpdateActiveEvents();
-            CheckForNewEvents();
+            
+            if (Time.time >= nextEventCheckTime)
+            {
+                CheckForNewEvents();
+                nextEventCheckTime = Time.time + eventCheckInterval;
+            }
         }
 
         private void UpdateActiveEvents()
         {
             for (int i = activeEvents.Count - 1; i >= 0; i--)
             {
-                WorldEvent evt = activeEvents[i];
-                evt.ElapsedTime += Time.deltaTime;
-                activeEvents[i] = evt;
-
-                if (evt.ElapsedTime >= evt.Duration)
+                var worldEvent = activeEvents[i];
+                worldEvent.Update(Time.deltaTime);
+                
+                if (worldEvent.IsExpired)
                 {
-                    EndEvent(i);
-                }
-                else
-                {
-                    UpdateEventEffects(evt);
+                    EndEvent(worldEvent);
+                    activeEvents.RemoveAt(i);
                 }
             }
         }
 
         private void CheckForNewEvents()
         {
-            if (Time.time - lastEventCheckTime < eventCheckInterval) return;
-            if (Time.time - lastEventEndTime < minTimeBetweenEvents) return;
             if (activeEvents.Count >= maxConcurrentEvents) return;
+            if (Time.time - lastEventEndTime < minTimeBetweenEvents) return;
 
-            lastEventCheckTime = Time.time;
-            TryStartRandomEvent();
-        }
+            float roll = (float)eventRandom.NextDouble();
+            float cumulativeChance = 0f;
 
-        private void TryStartRandomEvent()
-        {
-            float roll = UnityEngine.Random.value;
-            float cumulative = 0f;
+            WorldEventType[] eventTypes = (WorldEventType[])Enum.GetValues(typeof(WorldEventType));
+            float[] chances = { meteorShowerChance, auroraWaveChance, migrationChance, 
+                               bloomChance, solarFlareChance, cosmicDriftChance, harmonicResonanceChance };
 
-            var eventChances = new (WorldEventType type, float chance)[]
+            for (int i = 0; i < eventTypes.Length && i < chances.Length; i++)
             {
-                (WorldEventType.MeteorShower, meteorShowerChance),
-                (WorldEventType.AuroraWave, auroraWaveChance),
-                (WorldEventType.Migration, migrationChance),
-                (WorldEventType.Bloom, bloomChance),
-                (WorldEventType.SolarFlare, solarFlareChance),
-                (WorldEventType.CosmicDrift, cosmicDriftChance),
-                (WorldEventType.HarmonicResonance, harmonicResonanceChance)
-            };
-
-            foreach (var (type, chance) in eventChances)
-            {
-                cumulative += chance;
-                if (roll < cumulative && !IsEventTypeActive(type))
+                cumulativeChance += chances[i];
+                if (roll <= cumulativeChance && !IsEventActive(eventTypes[i]))
                 {
-                    StartEvent(type);
+                    StartEvent(eventTypes[i]);
                     break;
                 }
             }
         }
 
-        private bool IsEventTypeActive(WorldEventType type)
+        /// <summary>
+        /// Checks if an event of the specified type is currently active.
+        /// </summary>
+        public bool IsEventActive(WorldEventType eventType)
         {
-            foreach (var evt in activeEvents)
+            for (int i = 0; i < activeEvents.Count; i++)
             {
-                if (evt.Type == type) return true;
+                if (activeEvents[i].Type == eventType)
+                {
+                    return true;
+                }
             }
             return false;
         }
 
-        public void StartEvent(WorldEventType type)
+        public void StartEvent(WorldEventType eventType)
         {
-            float duration = GetEventDuration(type);
-            WorldEvent newEvent = new WorldEvent
-            {
-                Type = type,
-                Duration = duration,
-                ElapsedTime = 0f,
-                Intensity = 1f,
-                Position = GetEventPosition(type)
-            };
+            if (IsEventActive(eventType)) return;
 
-            activeEvents.Add(newEvent);
-            OnEventStarted?.Invoke(newEvent);
-
-            if (debugMode)
+            float duration = GetEventDuration(eventType);
+            var worldEvent = new WorldEvent(eventType, duration);
+            
+            activeEvents.Add(worldEvent);
+            OnEventStarted?.Invoke(worldEvent);
+            
+            Debug.Log($"[WorldEvent] {eventType} started (duration: {duration}s)");
+            
+            if (eventType == WorldEventType.AuroraWave)
             {
-                Debug.Log($"[WorldEvent] Started: {type} (Duration: {duration:F1}s)");
+                OnAuroraWave?.Invoke();
             }
-
-            InitializeEventEffects(newEvent);
         }
 
-        private void EndEvent(int index)
+        private void EndEvent(WorldEvent worldEvent)
         {
-            if (index < 0 || index >= activeEvents.Count) return;
-
-            WorldEvent evt = activeEvents[index];
-            activeEvents.RemoveAt(index);
+            OnEventEnded?.Invoke(worldEvent);
             lastEventEndTime = Time.time;
-
-            OnEventEnded?.Invoke(evt);
-
-            if (debugMode)
-            {
-                Debug.Log($"[WorldEvent] Ended: {evt.Type}");
-            }
-
-            CleanupEventEffects(evt);
+            Debug.Log($"[WorldEvent] {worldEvent.Type} ended");
         }
 
-        private float GetEventDuration(WorldEventType type)
+        private float GetEventDuration(WorldEventType eventType)
         {
-            return type switch
+            return eventType switch
             {
                 WorldEventType.MeteorShower => meteorShowerDuration,
                 WorldEventType.AuroraWave => auroraWaveDuration,
@@ -210,104 +196,81 @@ namespace SkyRingTerrarium.World
             };
         }
 
-        private Vector3 GetEventPosition(WorldEventType type)
+        public void TriggerMeteorImpact(Vector2 position)
         {
-            // Events can occur at random positions around the ring
-            float angle = UnityEngine.Random.Range(0f, 360f) * Mathf.Deg2Rad;
-            float radius = 100f; // Assume standard ring radius
-            return new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius);
+            OnMeteorImpact?.Invoke(position);
         }
 
-        private void InitializeEventEffects(WorldEvent evt)
+        public void ForceStartEvent(WorldEventType eventType)
         {
-            switch (evt.Type)
+            if (!IsEventActive(eventType))
             {
-                case WorldEventType.MeteorShower:
-                    // Start spawning meteors
-                    break;
-                case WorldEventType.AuroraWave:
-                    OnAuroraWave?.Invoke();
-                    break;
-                case WorldEventType.Migration:
-                    // Trigger creature migration
-                    break;
-                case WorldEventType.Bloom:
-                    // Start flora bloom effects
-                    break;
-                case WorldEventType.SolarFlare:
-                    // Increase lighting intensity
-                    break;
-                case WorldEventType.CosmicDrift:
-                    // Modify gravity slightly
-                    break;
-                case WorldEventType.HarmonicResonance:
-                    // Create harmonic effects
-                    break;
-            }
-        }
-
-        private void UpdateEventEffects(WorldEvent evt)
-        {
-            float progress = evt.ElapsedTime / evt.Duration;
-            
-            // Intensity ramps up then down
-            float intensity = progress < 0.2f ? progress / 0.2f :
-                             progress > 0.8f ? (1f - progress) / 0.2f : 1f;
-
-            if (evt.Type == WorldEventType.MeteorShower && UnityEngine.Random.value < 0.02f * intensity)
-            {
-                Vector2 impactPos = new Vector2(
-                    evt.Position.x + UnityEngine.Random.Range(-50f, 50f),
-                    evt.Position.z + UnityEngine.Random.Range(-50f, 50f)
-                );
-                OnMeteorImpact?.Invoke(impactPos);
-            }
-        }
-
-        private void CleanupEventEffects(WorldEvent evt)
-        {
-            // Clean up any event-specific effects
-        }
-
-        // Public API
-        public void ForceStartEvent(WorldEventType type)
-        {
-            if (!IsEventTypeActive(type))
-            {
-                StartEvent(type);
+                StartEvent(eventType);
             }
         }
 
         public void ForceEndAllEvents()
         {
-            while (activeEvents.Count > 0)
+            foreach (var worldEvent in activeEvents)
             {
-                EndEvent(0);
+                OnEventEnded?.Invoke(worldEvent);
             }
+            activeEvents.Clear();
+            lastEventEndTime = Time.time;
         }
 
-        public WorldEvent? GetActiveEvent(WorldEventType type)
+        public WorldEvent GetActiveEvent(WorldEventType eventType)
         {
-            foreach (var evt in activeEvents)
+            for (int i = 0; i < activeEvents.Count; i++)
             {
-                if (evt.Type == type) return evt;
+                if (activeEvents[i].Type == eventType)
+                {
+                    return activeEvents[i];
+                }
             }
             return null;
         }
     }
 
-    /// <summary>
-    /// Represents an active world event
-    /// </summary>
-    public struct WorldEvent
+    [Serializable]
+    public class WorldEvent
     {
-        public WorldEventManager.WorldEventType Type;
-        public float Duration;
-        public float ElapsedTime;
-        public float Intensity;
-        public Vector3 Position;
+        public WorldEventManager.WorldEventType Type { get; private set; }
+        public float Duration { get; private set; }
+        public float ElapsedTime { get; private set; }
+        public float Intensity { get; private set; }
+        public bool IsExpired => ElapsedTime >= Duration;
+        public float Progress => Mathf.Clamp01(ElapsedTime / Duration);
 
-        public float Progress => Duration > 0 ? ElapsedTime / Duration : 0f;
-        public float RemainingTime => Mathf.Max(0f, Duration - ElapsedTime);
+        public WorldEvent(WorldEventManager.WorldEventType type, float duration)
+        {
+            Type = type;
+            Duration = duration;
+            ElapsedTime = 0f;
+            Intensity = 1f;
+        }
+
+        public void Update(float deltaTime)
+        {
+            ElapsedTime += deltaTime;
+            
+            float fadeInTime = Duration * 0.1f;
+            float fadeOutTime = Duration * 0.2f;
+            
+            if (ElapsedTime < fadeInTime)
+            {
+                Intensity = ElapsedTime / fadeInTime;
+            }
+            else if (ElapsedTime > Duration - fadeOutTime)
+            {
+                Intensity = (Duration - ElapsedTime) / fadeOutTime;
+            }
+            else
+            {
+                Intensity = 1f;
+            }
+            
+            Intensity = Mathf.Clamp01(Intensity);
+        }
     }
 }
