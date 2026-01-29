@@ -28,10 +28,10 @@ namespace SkyRingTerrarium.World
         [Header("Time Configuration")]
         [Tooltip("Real-time minutes for one full game day (24 hours)")]
         [SerializeField] private float realMinutesPerGameDay = 10f;
-        
+
         [Tooltip("How many game days per season")]
         [SerializeField] private int daysPerSeason = 7;
-        
+
         [Header("Time of Day Thresholds (0-1)")]
         [SerializeField] private float dawnStart = 0.2f;
         [SerializeField] private float dayStart = 0.3f;
@@ -57,7 +57,7 @@ namespace SkyRingTerrarium.World
         [SerializeField] private float winterDayLengthMod = 0.7f;
 
         [Header("References")]
-        [SerializeField] private Light2D sunLight;
+        [SerializeField] private Light sunLight; // Use regular Light instead of Light2D for compatibility
         [SerializeField] private Transform sunPivot;
         #endregion
 
@@ -99,7 +99,7 @@ namespace SkyRingTerrarium.World
                 return;
             }
             Instance = this;
-            
+
             CalculateSecondsPerDay();
             UpdateTimeOfDayPhase();
             UpdateSeason();
@@ -156,7 +156,7 @@ namespace SkyRingTerrarium.World
         private void AdvanceDay()
         {
             currentDay++;
-            
+
             if (currentDay != previousDay)
             {
                 OnDayChanged?.Invoke(currentDay);
@@ -258,7 +258,7 @@ namespace SkyRingTerrarium.World
             }
 
             ApplySeasonColorTint();
-            
+
             if (sunLight != null)
             {
                 sunLight.color = currentAmbientColor;
@@ -351,10 +351,10 @@ namespace SkyRingTerrarium.World
             currentDay = state.currentDay;
             currentYear = state.currentYear;
             timeOfDayNormalized = state.timeOfDayNormalized;
-            
+
             UpdateSeason();
             CalculateSecondsPerDay();
-            
+
             AdvanceTime(secondsElapsed);
         }
 
