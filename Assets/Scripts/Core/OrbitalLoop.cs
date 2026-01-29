@@ -54,7 +54,7 @@ namespace SkyRingTerrarium.Core
         private void CheckForOrbitEntry(OrbitalBody body)
         {
             float altitude = GetOrbitalAltitude(body.transform.position);
-            
+
             if (altitude < minOrbitalAltitude || altitude > maxOrbitalAltitude)
                 return;
 
@@ -72,7 +72,7 @@ namespace SkyRingTerrarium.Core
             body.IsInOrbit = true;
             body.OrbitalAltitude = altitude;
             body.OrbitalVelocity = CalculateOrbitalVelocity(altitude);
-            
+
             var gravityBody = body.GetComponent<GravityAffectedBody>();
             if (gravityBody != null)
                 gravityBody.GravityScale = 0f;
@@ -134,10 +134,10 @@ namespace SkyRingTerrarium.Core
         private float CalculateOrbitalVelocity(float altitude)
         {
             if (GravitySystem.Instance == null) return 0f;
-            
+
             float radius = GravitySystem.Instance.RingRadius + altitude;
             float gravity = GravitySystem.Instance.GravityStrength;
-            
+
             return Mathf.Sqrt(gravity * radius);
         }
 
@@ -189,24 +189,6 @@ namespace SkyRingTerrarium.Core
 
                 Gizmos.DrawLine(p1, p2);
             }
-        }
-    }
-
-    /// <summary>
-    /// Component for objects that can enter orbital trajectories.
-    /// </summary>
-    [RequireComponent(typeof(Rigidbody))]
-    public class OrbitalBody : MonoBehaviour
-    {
-        public Rigidbody Rigidbody { get; private set; }
-        public bool IsInOrbit { get; set; }
-        public float OrbitalAltitude { get; set; }
-        public float OrbitalVelocity { get; set; }
-        public float OrbitStability { get; set; } = 1f;
-
-        private void Awake()
-        {
-            Rigidbody = GetComponent<Rigidbody>();
         }
     }
 }
