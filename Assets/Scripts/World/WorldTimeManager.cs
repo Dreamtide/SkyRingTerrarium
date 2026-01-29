@@ -45,30 +45,27 @@ namespace SkyRingTerrarium.World
 
         [Header("Light References (Optional)")]
         [SerializeField] private Light directionalLight;
-        // Note: Light2D removed - use URP/Built-in lights only
-
-        [Header("Debug")]
-        [SerializeField] private bool pauseTime = false;
-        [SerializeField] private float debugTimeScale = 1f;
         #endregion
 
         #region Private Fields
-        private float currentTimeOfDay = 0.25f; // Start at dawn
-        private TimeOfDay currentPhase = TimeOfDay.Dawn;
-        private Season currentSeason = Season.Spring;
+        private float timeOfDayNormalized = 0.3f;
         private int currentDay = 1;
         private int currentYear = 1;
-        
-        private float timeProgressionRate;
+        private Season currentSeason = Season.Spring;
+        private TimeOfDay currentTimePhase = TimeOfDay.Day;
+        private float timeScale = 1f;
+        private bool isPaused = false;
         #endregion
 
-        #region Properties
-        public float CurrentTimeOfDay => currentTimeOfDay;
-        public TimeOfDay CurrentPhase => currentPhase;
+        #region Public Properties
+        public float TimeOfDayNormalized => timeOfDayNormalized;
+        public TimeOfDay CurrentTimeOfDayPhase => currentTimePhase;
         public Season CurrentSeason => currentSeason;
         public int CurrentDay => currentDay;
         public int CurrentYear => currentYear;
-        public bool IsPaused => pauseTime;
+        public float TimeScale { get => timeScale; set => timeScale = Mathf.Max(0f, value); }
+        public bool IsPaused { get => isPaused; set => isPaused = value; }
+        public bool IsDay => currentTimePhase == TimeOfDay.Day || currentTimePhase == TimeOfDay.Dawn;
         #endregion
 
         private void Awake()
@@ -79,8 +76,7 @@ namespace SkyRingTerrarium.World
                 return;
             }
             Instance = this;
-
-            CalculateTimeProgressionRate();
+            
             InitializeGradients();
         }
 
@@ -94,18 +90,10 @@ namespace SkyRingTerrarium.World
 
         private void Update()
         {
-            if (!pauseTime)
+            if (!isPaused)
             {
-                ProgressTime();
-                UpdateVisuals();
+                AdvanceTime(Time.deltaTime);
             }
-        }
-
-        private void CalculateTimeProgressionRate()
-        {
-            // Convert real minutes to seconds, then calculate rate for 0-1 cycle
-            float realSecondsPerDay = realMinutesPerGameDay * 60f;
-            timeProgressionRate = 1f / realSecondsPerDay;
         }
 
         private void InitializeGradients()
@@ -117,26 +105,10 @@ namespace SkyRingTerrarium.World
                     new GradientColorKey[]
                     {
                         new GradientColorKey(new Color(0.1f, 0.1f, 0.2f), 0f),
-                        new GradientColorKey(new Color(0.9f, 0.6f, 0.4f), 0.25f),
-                        new GradientColorKey(new Color(0.5f, 0.7f, 0.9f), 0.5f),
-                        new GradientColorKey(new Color(0.9f, 0.5f, 0.3f), 0.75f),
+                        new GradientColorKey(new Color(1f, 0.6f, 0.3f), 0.25f),
+                        new GradientColorKey(new Color(0.5f, 0.7f, 1f), 0.5f),
+                        new GradientColorKey(new Color(1f, 0.5f, 0.3f), 0.75f),
                         new GradientColorKey(new Color(0.1f, 0.1f, 0.2f), 1f)
-                    },
-                    new GradientAlphaKey[] { new GradientAlphaKey(1f, 0f), new GradientAlphaKey(1f, 1f) }
-                );
-            }
-
-            if (ambientColorGradient == null || ambientColorGradient.colorKeys.Length == 0)
-            {
-                ambientColorGradient = new Gradient();
-                ambientColorGradient.SetKeys(
-                    new GradientColorKey[]
-                    {
-                        new GradientColorKey(new Color(0.2f, 0.2f, 0.3f), 0f),
-                        new GradientColorKey(new Color(0.8f, 0.7f, 0.6f), 0.25f),
-                        new GradientColorKey(new Color(1f, 1f, 1f), 0.5f),
-                        new GradientColorKey(new Color(0.8f, 0.6f, 0.5f), 0.75f),
-                        new GradientColorKey(new Color(0.2f, 0.2f, 0.3f), 1f)
                     },
                     new GradientAlphaKey[] { new GradientAlphaKey(1f, 0f), new GradientAlphaKey(1f, 1f) }
                 );
@@ -154,47 +126,57 @@ namespace SkyRingTerrarium.World
             }
         }
 
-        private void ProgressTime()
+        private void AdvanceTime(float deltaTime)
         {
-            float previousTime = currentTimeOfDay;
-            currentTimeOfDay += timeProgressionRate * Time.deltaTime * debugTimeScale;
-
-            if (currentTimeOfDay >= 1f)
+            float dayProgressionPerSecond = 1f / (realMinutesPerGameDay * 60f);
+            float timeAdvance = dayProgressionPerSecond * deltaTime * timeScale;
+            
+            float previousTime = timeOfDayNormalized;
+            timeOfDayNormalized += timeAdvance;
+            
+            if (timeOfDayNormalized >= 1f)
             {
-                currentTimeOfDay -= 1f;
+                timeOfDayNormalized -= 1f;
                 AdvanceDay();
             }
-
-            OnTimeOfDayChanged?.Invoke(currentTimeOfDay);
+            
+            OnTimeOfDayChanged?.Invoke(timeOfDayNormalized);
+            
             UpdateTimePhase();
+            UpdateVisuals();
         }
 
         private void UpdateTimePhase()
         {
             TimeOfDay newPhase;
             
-            if (currentTimeOfDay < dawnStart || currentTimeOfDay >= nightStart)
-            {
+            if (timeOfDayNormalized < dawnStart || timeOfDayNormalized >= nightStart)
                 newPhase = TimeOfDay.Night;
-            }
-            else if (currentTimeOfDay < dayStart)
-            {
+            else if (timeOfDayNormalized < dayStart)
                 newPhase = TimeOfDay.Dawn;
-            }
-            else if (currentTimeOfDay < duskStart)
-            {
+            else if (timeOfDayNormalized < duskStart)
                 newPhase = TimeOfDay.Day;
-            }
             else
-            {
                 newPhase = TimeOfDay.Dusk;
-            }
-
-            if (newPhase != currentPhase)
+            
+            if (newPhase != currentTimePhase)
             {
-                currentPhase = newPhase;
-                OnTimeOfDayPhaseChanged?.Invoke(currentPhase);
-                Debug.Log($"[WorldTime] Phase changed to: {currentPhase}");
+                currentTimePhase = newPhase;
+                OnTimeOfDayPhaseChanged?.Invoke(currentTimePhase);
+            }
+        }
+
+        private void UpdateVisuals()
+        {
+            if (directionalLight != null)
+            {
+                directionalLight.intensity = lightIntensityCurve.Evaluate(timeOfDayNormalized);
+                directionalLight.color = skyColorGradient.Evaluate(timeOfDayNormalized);
+            }
+            
+            if (ambientColorGradient != null)
+            {
+                RenderSettings.ambientLight = ambientColorGradient.Evaluate(timeOfDayNormalized);
             }
         }
 
@@ -202,68 +184,63 @@ namespace SkyRingTerrarium.World
         {
             currentDay++;
             OnDayChanged?.Invoke(currentDay);
-
-            if (currentDay > daysPerSeason)
+            
+            if (currentDay > daysPerSeason * 4)
             {
                 currentDay = 1;
-                AdvanceSeason();
-            }
-        }
-
-        private void AdvanceSeason()
-        {
-            currentSeason = (Season)(((int)currentSeason + 1) % 4);
-            OnSeasonChanged?.Invoke(currentSeason);
-            Debug.Log($"[WorldTime] Season changed to: {currentSeason}");
-
-            if (currentSeason == Season.Spring)
-            {
                 currentYear++;
                 OnYearChanged?.Invoke(currentYear);
-                Debug.Log($"[WorldTime] Year changed to: {currentYear}");
             }
+            
+            UpdateSeason();
         }
 
-        private void UpdateVisuals()
+        private void UpdateSeason()
         {
-            // Update sky color
-            Color skyColor = skyColorGradient.Evaluate(currentTimeOfDay);
-            RenderSettings.skybox?.SetColor("_Tint", skyColor);
-
-            // Update ambient color
-            Color ambientColor = ambientColorGradient.Evaluate(currentTimeOfDay);
-            RenderSettings.ambientLight = ambientColor;
-
-            // Update directional light
-            if (directionalLight != null)
+            int dayInYear = ((currentDay - 1) % (daysPerSeason * 4)) + 1;
+            Season newSeason;
+            
+            if (dayInYear <= daysPerSeason)
+                newSeason = Season.Spring;
+            else if (dayInYear <= daysPerSeason * 2)
+                newSeason = Season.Summer;
+            else if (dayInYear <= daysPerSeason * 3)
+                newSeason = Season.Autumn;
+            else
+                newSeason = Season.Winter;
+            
+            if (newSeason != currentSeason)
             {
-                directionalLight.intensity = lightIntensityCurve.Evaluate(currentTimeOfDay);
-                directionalLight.color = ambientColor;
-
-                // Rotate sun based on time
-                float sunAngle = currentTimeOfDay * 360f - 90f;
-                directionalLight.transform.rotation = Quaternion.Euler(sunAngle, 170f, 0f);
+                currentSeason = newSeason;
+                OnSeasonChanged?.Invoke(currentSeason);
             }
         }
 
-        #region Public API
-
+        #region Public Methods
         public void SetTime(float normalizedTime)
         {
-            currentTimeOfDay = Mathf.Clamp01(normalizedTime);
+            timeOfDayNormalized = Mathf.Clamp01(normalizedTime);
             UpdateTimePhase();
             UpdateVisuals();
-            OnTimeOfDayChanged?.Invoke(currentTimeOfDay);
+            OnTimeOfDayChanged?.Invoke(timeOfDayNormalized);
+        }
+
+        public void SetTime(float normalizedTime, int day, Season season)
+        {
+            timeOfDayNormalized = Mathf.Clamp01(normalizedTime);
+            currentDay = Mathf.Max(1, day);
+            currentSeason = season;
+            UpdateTimePhase();
+            UpdateVisuals();
+            OnTimeOfDayChanged?.Invoke(timeOfDayNormalized);
+            OnDayChanged?.Invoke(currentDay);
+            OnSeasonChanged?.Invoke(currentSeason);
         }
 
         public void SetDay(int day)
         {
             currentDay = Mathf.Max(1, day);
-            while (currentDay > daysPerSeason)
-            {
-                currentDay -= daysPerSeason;
-                AdvanceSeason();
-            }
+            UpdateSeason();
             OnDayChanged?.Invoke(currentDay);
         }
 
@@ -273,28 +250,47 @@ namespace SkyRingTerrarium.World
             OnSeasonChanged?.Invoke(currentSeason);
         }
 
-        public void PauseTime(bool pause)
+        public Color GetCurrentSkyColor()
         {
-            pauseTime = pause;
+            return skyColorGradient.Evaluate(timeOfDayNormalized);
         }
 
-        public void SetTimeScale(float scale)
+        public float GetCurrentLightIntensity()
         {
-            debugTimeScale = Mathf.Max(0f, scale);
+            return lightIntensityCurve.Evaluate(timeOfDayNormalized);
         }
 
-        public string GetFormattedTime()
+        public TimeState GetCurrentTimeState()
         {
-            int hours = Mathf.FloorToInt(currentTimeOfDay * 24f);
-            int minutes = Mathf.FloorToInt((currentTimeOfDay * 24f - hours) * 60f);
-            return $"{hours:D2}:{minutes:D2}";
+            return new TimeState
+            {
+                timeOfDay = timeOfDayNormalized,
+                day = currentDay,
+                year = currentYear,
+                season = currentSeason,
+                phase = currentTimePhase
+            };
         }
 
-        public string GetFormattedDate()
+        public void LoadTimeState(TimeState state)
         {
-            return $"Year {currentYear}, {currentSeason}, Day {currentDay}";
+            timeOfDayNormalized = state.timeOfDay;
+            currentDay = state.day;
+            currentYear = state.year;
+            currentSeason = state.season;
+            currentTimePhase = state.phase;
+            UpdateVisuals();
         }
-
         #endregion
+    }
+
+    [Serializable]
+    public struct TimeState
+    {
+        public float timeOfDay;
+        public int day;
+        public int year;
+        public WorldTimeManager.Season season;
+        public WorldTimeManager.TimeOfDay phase;
     }
 }
