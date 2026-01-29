@@ -32,65 +32,45 @@ namespace SkyRingTerrarium.World
         [Tooltip("How many game days per season")]
         [SerializeField] private int daysPerSeason = 7;
 
-        [Header("Time of Day Thresholds (0-1)")]
+        [Header("Time of Day Thresholds")]
         [SerializeField] private float dawnStart = 0.2f;
         [SerializeField] private float dayStart = 0.3f;
         [SerializeField] private float duskStart = 0.7f;
-        [SerializeField] private float nightStart = 0.85f;
+        [SerializeField] private float nightStart = 0.8f;
 
-        [Header("Ambient Colors")]
-        [SerializeField] private Color dawnColor = new Color(1f, 0.7f, 0.4f, 1f);
-        [SerializeField] private Color dayColor = new Color(1f, 1f, 0.95f, 1f);
-        [SerializeField] private Color duskColor = new Color(0.8f, 0.4f, 0.6f, 1f);
-        [SerializeField] private Color nightColor = new Color(0.1f, 0.1f, 0.3f, 1f);
+        [Header("Visual Settings")]
+        [SerializeField] private Gradient skyColorGradient;
+        [SerializeField] private Gradient ambientColorGradient;
+        [SerializeField] private AnimationCurve lightIntensityCurve;
 
-        [Header("Light Intensity")]
-        [SerializeField] private float dawnIntensity = 0.5f;
-        [SerializeField] private float dayIntensity = 1f;
-        [SerializeField] private float duskIntensity = 0.4f;
-        [SerializeField] private float nightIntensity = 0.1f;
+        [Header("Light References (Optional)")]
+        [SerializeField] private Light directionalLight;
+        // Note: Light2D removed - use URP/Built-in lights only
 
-        [Header("Season Modifiers")]
-        [SerializeField] private float springDayLengthMod = 1f;
-        [SerializeField] private float summerDayLengthMod = 1.3f;
-        [SerializeField] private float autumnDayLengthMod = 1f;
-        [SerializeField] private float winterDayLengthMod = 0.7f;
-
-        [Header("References")]
-        [SerializeField] private Light sunLight; // Use regular Light instead of Light2D for compatibility
-        [SerializeField] private Transform sunPivot;
-        #endregion
-
-        #region Public Properties
-        public float TimeOfDayNormalized => timeOfDayNormalized;
-        public TimeOfDay CurrentTimeOfDayPhase => currentPhase;
-        public Season CurrentSeason => currentSeason;
-        public int CurrentDay => currentDay;
-        public int CurrentYear => currentYear;
-        public float DayProgress => timeOfDayNormalized;
-        public bool IsDay => currentPhase == TimeOfDay.Day || currentPhase == TimeOfDay.Dawn;
-        public bool IsNight => currentPhase == TimeOfDay.Night || currentPhase == TimeOfDay.Dusk;
-        public Color CurrentAmbientColor => currentAmbientColor;
-        public float CurrentLightIntensity => currentLightIntensity;
-        public float SeasonProgress => (float)(currentDay % daysPerSeason) / daysPerSeason;
+        [Header("Debug")]
+        [SerializeField] private bool pauseTime = false;
+        [SerializeField] private float debugTimeScale = 1f;
         #endregion
 
         #region Private Fields
-        private float timeOfDayNormalized;
-        private TimeOfDay currentPhase;
-        private TimeOfDay previousPhase;
-        private Season currentSeason;
-        private Season previousSeason;
-        private int currentDay;
-        private int previousDay;
-        private int currentYear;
-        private int previousYear;
-        private Color currentAmbientColor;
-        private float currentLightIntensity;
-        private float secondsPerGameDay;
+        private float currentTimeOfDay = 0.25f; // Start at dawn
+        private TimeOfDay currentPhase = TimeOfDay.Dawn;
+        private Season currentSeason = Season.Spring;
+        private int currentDay = 1;
+        private int currentYear = 1;
+        
+        private float timeProgressionRate;
         #endregion
 
-        #region Unity Lifecycle
+        #region Properties
+        public float CurrentTimeOfDay => currentTimeOfDay;
+        public TimeOfDay CurrentPhase => currentPhase;
+        public Season CurrentSeason => currentSeason;
+        public int CurrentDay => currentDay;
+        public int CurrentYear => currentYear;
+        public bool IsPaused => pauseTime;
+        #endregion
+
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -100,284 +80,221 @@ namespace SkyRingTerrarium.World
             }
             Instance = this;
 
-            CalculateSecondsPerDay();
-            UpdateTimeOfDayPhase();
-            UpdateSeason();
+            CalculateTimeProgressionRate();
+            InitializeGradients();
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this)
+            {
+                Instance = null;
+            }
         }
 
         private void Update()
         {
-            AdvanceTime(Time.deltaTime);
-            UpdateVisuals();
-        }
-
-        private void OnValidate()
-        {
-            CalculateSecondsPerDay();
-        }
-        #endregion
-
-        #region Time Progression
-        private void CalculateSecondsPerDay()
-        {
-            float seasonMod = GetSeasonDayLengthModifier();
-            secondsPerGameDay = realMinutesPerGameDay * 60f * seasonMod;
-        }
-
-        private float GetSeasonDayLengthModifier()
-        {
-            return currentSeason switch
+            if (!pauseTime)
             {
-                Season.Spring => springDayLengthMod,
-                Season.Summer => summerDayLengthMod,
-                Season.Autumn => autumnDayLengthMod,
-                Season.Winter => winterDayLengthMod,
-                _ => 1f
-            };
+                ProgressTime();
+                UpdateVisuals();
+            }
         }
 
-        public void AdvanceTime(float deltaSeconds)
+        private void CalculateTimeProgressionRate()
         {
-            if (secondsPerGameDay <= 0) return;
+            // Convert real minutes to seconds, then calculate rate for 0-1 cycle
+            float realSecondsPerDay = realMinutesPerGameDay * 60f;
+            timeProgressionRate = 1f / realSecondsPerDay;
+        }
 
-            float dayDelta = deltaSeconds / secondsPerGameDay;
-            timeOfDayNormalized += dayDelta;
-
-            while (timeOfDayNormalized >= 1f)
+        private void InitializeGradients()
+        {
+            if (skyColorGradient == null || skyColorGradient.colorKeys.Length == 0)
             {
-                timeOfDayNormalized -= 1f;
+                skyColorGradient = new Gradient();
+                skyColorGradient.SetKeys(
+                    new GradientColorKey[]
+                    {
+                        new GradientColorKey(new Color(0.1f, 0.1f, 0.2f), 0f),
+                        new GradientColorKey(new Color(0.9f, 0.6f, 0.4f), 0.25f),
+                        new GradientColorKey(new Color(0.5f, 0.7f, 0.9f), 0.5f),
+                        new GradientColorKey(new Color(0.9f, 0.5f, 0.3f), 0.75f),
+                        new GradientColorKey(new Color(0.1f, 0.1f, 0.2f), 1f)
+                    },
+                    new GradientAlphaKey[] { new GradientAlphaKey(1f, 0f), new GradientAlphaKey(1f, 1f) }
+                );
+            }
+
+            if (ambientColorGradient == null || ambientColorGradient.colorKeys.Length == 0)
+            {
+                ambientColorGradient = new Gradient();
+                ambientColorGradient.SetKeys(
+                    new GradientColorKey[]
+                    {
+                        new GradientColorKey(new Color(0.2f, 0.2f, 0.3f), 0f),
+                        new GradientColorKey(new Color(0.8f, 0.7f, 0.6f), 0.25f),
+                        new GradientColorKey(new Color(1f, 1f, 1f), 0.5f),
+                        new GradientColorKey(new Color(0.8f, 0.6f, 0.5f), 0.75f),
+                        new GradientColorKey(new Color(0.2f, 0.2f, 0.3f), 1f)
+                    },
+                    new GradientAlphaKey[] { new GradientAlphaKey(1f, 0f), new GradientAlphaKey(1f, 1f) }
+                );
+            }
+
+            if (lightIntensityCurve == null || lightIntensityCurve.keys.Length == 0)
+            {
+                lightIntensityCurve = new AnimationCurve(
+                    new Keyframe(0f, 0.1f),
+                    new Keyframe(0.25f, 0.5f),
+                    new Keyframe(0.5f, 1f),
+                    new Keyframe(0.75f, 0.5f),
+                    new Keyframe(1f, 0.1f)
+                );
+            }
+        }
+
+        private void ProgressTime()
+        {
+            float previousTime = currentTimeOfDay;
+            currentTimeOfDay += timeProgressionRate * Time.deltaTime * debugTimeScale;
+
+            if (currentTimeOfDay >= 1f)
+            {
+                currentTimeOfDay -= 1f;
                 AdvanceDay();
             }
 
-            OnTimeOfDayChanged?.Invoke(timeOfDayNormalized);
-            UpdateTimeOfDayPhase();
+            OnTimeOfDayChanged?.Invoke(currentTimeOfDay);
+            UpdateTimePhase();
+        }
+
+        private void UpdateTimePhase()
+        {
+            TimeOfDay newPhase;
+            
+            if (currentTimeOfDay < dawnStart || currentTimeOfDay >= nightStart)
+            {
+                newPhase = TimeOfDay.Night;
+            }
+            else if (currentTimeOfDay < dayStart)
+            {
+                newPhase = TimeOfDay.Dawn;
+            }
+            else if (currentTimeOfDay < duskStart)
+            {
+                newPhase = TimeOfDay.Day;
+            }
+            else
+            {
+                newPhase = TimeOfDay.Dusk;
+            }
+
+            if (newPhase != currentPhase)
+            {
+                currentPhase = newPhase;
+                OnTimeOfDayPhaseChanged?.Invoke(currentPhase);
+                Debug.Log($"[WorldTime] Phase changed to: {currentPhase}");
+            }
         }
 
         private void AdvanceDay()
         {
             currentDay++;
+            OnDayChanged?.Invoke(currentDay);
 
-            if (currentDay != previousDay)
+            if (currentDay > daysPerSeason)
             {
-                OnDayChanged?.Invoke(currentDay);
-                previousDay = currentDay;
+                currentDay = 1;
+                AdvanceSeason();
             }
-
-            UpdateSeason();
         }
 
-        private void UpdateTimeOfDayPhase()
+        private void AdvanceSeason()
         {
-            if (timeOfDayNormalized < dawnStart)
-                currentPhase = TimeOfDay.Night;
-            else if (timeOfDayNormalized < dayStart)
-                currentPhase = TimeOfDay.Dawn;
-            else if (timeOfDayNormalized < duskStart)
-                currentPhase = TimeOfDay.Day;
-            else if (timeOfDayNormalized < nightStart)
-                currentPhase = TimeOfDay.Dusk;
-            else
-                currentPhase = TimeOfDay.Night;
+            currentSeason = (Season)(((int)currentSeason + 1) % 4);
+            OnSeasonChanged?.Invoke(currentSeason);
+            Debug.Log($"[WorldTime] Season changed to: {currentSeason}");
 
-            if (currentPhase != previousPhase)
+            if (currentSeason == Season.Spring)
             {
-                OnTimeOfDayPhaseChanged?.Invoke(currentPhase);
-                previousPhase = currentPhase;
+                currentYear++;
+                OnYearChanged?.Invoke(currentYear);
+                Debug.Log($"[WorldTime] Year changed to: {currentYear}");
             }
         }
 
-        private void UpdateSeason()
-        {
-            int totalSeasonDays = daysPerSeason * 4;
-            int dayInYear = currentDay % totalSeasonDays;
-            int seasonIndex = dayInYear / daysPerSeason;
-            currentSeason = (Season)seasonIndex;
-
-            int year = currentDay / totalSeasonDays;
-            if (year != currentYear)
-            {
-                currentYear = year;
-                if (currentYear != previousYear)
-                {
-                    OnYearChanged?.Invoke(currentYear);
-                    previousYear = currentYear;
-                }
-            }
-
-            if (currentSeason != previousSeason)
-            {
-                OnSeasonChanged?.Invoke(currentSeason);
-                previousSeason = currentSeason;
-                CalculateSecondsPerDay();
-            }
-        }
-        #endregion
-
-        #region Visual Updates
         private void UpdateVisuals()
         {
-            UpdateAmbientColor();
-            UpdateLightIntensity();
-            UpdateSunRotation();
+            // Update sky color
+            Color skyColor = skyColorGradient.Evaluate(currentTimeOfDay);
+            RenderSettings.skybox?.SetColor("_Tint", skyColor);
+
+            // Update ambient color
+            Color ambientColor = ambientColorGradient.Evaluate(currentTimeOfDay);
+            RenderSettings.ambientLight = ambientColor;
+
+            // Update directional light
+            if (directionalLight != null)
+            {
+                directionalLight.intensity = lightIntensityCurve.Evaluate(currentTimeOfDay);
+                directionalLight.color = ambientColor;
+
+                // Rotate sun based on time
+                float sunAngle = currentTimeOfDay * 360f - 90f;
+                directionalLight.transform.rotation = Quaternion.Euler(sunAngle, 170f, 0f);
+            }
         }
 
-        private void UpdateAmbientColor()
+        #region Public API
+
+        public void SetTime(float normalizedTime)
         {
-            if (timeOfDayNormalized < dawnStart)
-            {
-                currentAmbientColor = nightColor;
-            }
-            else if (timeOfDayNormalized < dayStart)
-            {
-                float t = (timeOfDayNormalized - dawnStart) / (dayStart - dawnStart);
-                currentAmbientColor = Color.Lerp(nightColor, dawnColor, t * 0.5f);
-                currentAmbientColor = Color.Lerp(currentAmbientColor, dayColor, t * 0.5f);
-            }
-            else if (timeOfDayNormalized < duskStart)
-            {
-                float midDay = (dayStart + duskStart) / 2f;
-                if (timeOfDayNormalized < midDay)
-                {
-                    float t = (timeOfDayNormalized - dayStart) / (midDay - dayStart);
-                    currentAmbientColor = Color.Lerp(dawnColor, dayColor, t);
-                }
-                else
-                {
-                    float t = (timeOfDayNormalized - midDay) / (duskStart - midDay);
-                    currentAmbientColor = Color.Lerp(dayColor, duskColor, t * 0.3f);
-                }
-            }
-            else if (timeOfDayNormalized < nightStart)
-            {
-                float t = (timeOfDayNormalized - duskStart) / (nightStart - duskStart);
-                currentAmbientColor = Color.Lerp(duskColor, nightColor, t);
-            }
-            else
-            {
-                currentAmbientColor = nightColor;
-            }
-
-            ApplySeasonColorTint();
-
-            if (sunLight != null)
-            {
-                sunLight.color = currentAmbientColor;
-            }
+            currentTimeOfDay = Mathf.Clamp01(normalizedTime);
+            UpdateTimePhase();
+            UpdateVisuals();
+            OnTimeOfDayChanged?.Invoke(currentTimeOfDay);
         }
 
-        private void ApplySeasonColorTint()
+        public void SetDay(int day)
         {
-            Color seasonTint = currentSeason switch
+            currentDay = Mathf.Max(1, day);
+            while (currentDay > daysPerSeason)
             {
-                Season.Spring => new Color(0.95f, 1f, 0.9f, 1f),
-                Season.Summer => new Color(1f, 1f, 0.85f, 1f),
-                Season.Autumn => new Color(1f, 0.9f, 0.8f, 1f),
-                Season.Winter => new Color(0.9f, 0.95f, 1f, 1f),
-                _ => Color.white
-            };
-            currentAmbientColor *= seasonTint;
+                currentDay -= daysPerSeason;
+                AdvanceSeason();
+            }
+            OnDayChanged?.Invoke(currentDay);
         }
 
-        private void UpdateLightIntensity()
+        public void SetSeason(Season season)
         {
-            if (timeOfDayNormalized < dawnStart)
-            {
-                currentLightIntensity = nightIntensity;
-            }
-            else if (timeOfDayNormalized < dayStart)
-            {
-                float t = (timeOfDayNormalized - dawnStart) / (dayStart - dawnStart);
-                currentLightIntensity = Mathf.Lerp(nightIntensity, dawnIntensity, t);
-            }
-            else if (timeOfDayNormalized < duskStart)
-            {
-                float midDay = (dayStart + duskStart) / 2f;
-                if (timeOfDayNormalized < midDay)
-                {
-                    float t = (timeOfDayNormalized - dayStart) / (midDay - dayStart);
-                    currentLightIntensity = Mathf.Lerp(dawnIntensity, dayIntensity, t);
-                }
-                else
-                {
-                    float t = (timeOfDayNormalized - midDay) / (duskStart - midDay);
-                    currentLightIntensity = Mathf.Lerp(dayIntensity, duskIntensity, t);
-                }
-            }
-            else if (timeOfDayNormalized < nightStart)
-            {
-                float t = (timeOfDayNormalized - duskStart) / (nightStart - duskStart);
-                currentLightIntensity = Mathf.Lerp(duskIntensity, nightIntensity, t);
-            }
-            else
-            {
-                currentLightIntensity = nightIntensity;
-            }
-
-            if (sunLight != null)
-            {
-                sunLight.intensity = currentLightIntensity;
-            }
+            currentSeason = season;
+            OnSeasonChanged?.Invoke(currentSeason);
         }
 
-        private void UpdateSunRotation()
+        public void PauseTime(bool pause)
         {
-            if (sunPivot != null)
-            {
-                float angle = timeOfDayNormalized * 360f;
-                sunPivot.localRotation = Quaternion.Euler(0, 0, -angle);
-            }
+            pauseTime = pause;
         }
+
+        public void SetTimeScale(float scale)
+        {
+            debugTimeScale = Mathf.Max(0f, scale);
+        }
+
+        public string GetFormattedTime()
+        {
+            int hours = Mathf.FloorToInt(currentTimeOfDay * 24f);
+            int minutes = Mathf.FloorToInt((currentTimeOfDay * 24f - hours) * 60f);
+            return $"{hours:D2}:{minutes:D2}";
+        }
+
+        public string GetFormattedDate()
+        {
+            return $"Year {currentYear}, {currentSeason}, Day {currentDay}";
+        }
+
         #endregion
-
-        #region Offline Progression
-        public WorldTimeState SaveState()
-        {
-            return new WorldTimeState
-            {
-                timeOfDayNormalized = timeOfDayNormalized,
-                currentDay = currentDay,
-                currentYear = currentYear,
-                lastSaveTime = DateTime.UtcNow.Ticks
-            };
-        }
-
-        public void LoadState(WorldTimeState state, float maxOfflineHours = 24f)
-        {
-            long ticksElapsed = DateTime.UtcNow.Ticks - state.lastSaveTime;
-            float secondsElapsed = ticksElapsed / (float)TimeSpan.TicksPerSecond;
-            float maxOfflineSeconds = maxOfflineHours * 3600f;
-            secondsElapsed = Mathf.Min(secondsElapsed, maxOfflineSeconds);
-
-            currentDay = state.currentDay;
-            currentYear = state.currentYear;
-            timeOfDayNormalized = state.timeOfDayNormalized;
-
-            UpdateSeason();
-            CalculateSecondsPerDay();
-
-            AdvanceTime(secondsElapsed);
-        }
-
-        public void SetTime(float normalizedTime, int day = -1, Season? season = null)
-        {
-            timeOfDayNormalized = Mathf.Clamp01(normalizedTime);
-            if (day >= 0) currentDay = day;
-            if (season.HasValue)
-            {
-                currentDay = (int)season.Value * daysPerSeason + (currentDay % daysPerSeason);
-            }
-            UpdateSeason();
-            UpdateTimeOfDayPhase();
-        }
-        #endregion
-    }
-
-    [System.Serializable]
-    public struct WorldTimeState
-    {
-        public float timeOfDayNormalized;
-        public int currentDay;
-        public int currentYear;
-        public long lastSaveTime;
     }
 }
