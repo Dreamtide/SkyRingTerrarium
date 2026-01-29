@@ -1,4 +1,5 @@
 using UnityEngine;
+using SkyRingTerrarium.Core;
 
 namespace SkyRingTerrarium
 {
@@ -37,24 +38,17 @@ namespace SkyRingTerrarium
                 : Vector3.zero;
             
             // Check for saved position
-            if (PlayerPrefs.HasKey("SavedPlayerX"))
+            if (SaveSystem.Instance != null && SaveSystem.Instance.HasSavedGame)
             {
-                spawnPos.x = PlayerPrefs.GetFloat("SavedPlayerX");
-                spawnPos.y = PlayerPrefs.GetFloat("SavedPlayerY");
-                PlayerPrefs.DeleteKey("SavedPlayerX");
-                PlayerPrefs.DeleteKey("SavedPlayerY");
+                // SaveSystem would provide last position
             }
             
             GameObject playerObj = Instantiate(playerPrefab, spawnPos, Quaternion.identity);
             playerInstance = playerObj.GetComponent<PlayerController>();
             
-            // Apply saved gravity state
-            if (PlayerPrefs.HasKey("SavedGravityInverted"))
+            if (playerInstance == null)
             {
-                bool inverted = PlayerPrefs.GetInt("SavedGravityInverted") == 1;
-                if (inverted)
-                    playerInstance.ForceFlipGravity();
-                PlayerPrefs.DeleteKey("SavedGravityInverted");
+                Debug.LogWarning("[MainGame] Player prefab missing PlayerController component");
             }
             
             Debug.Log($"[MainGame] Player spawned at {spawnPos}");
@@ -63,18 +57,30 @@ namespace SkyRingTerrarium
         private void SetupCamera()
         {
             if (mainCamera == null)
-                mainCamera = Camera.main;
-                
-            CameraFollow camFollow = mainCamera?.GetComponent<CameraFollow>();
-            if (camFollow != null && playerInstance != null)
             {
-                camFollow.SetTarget(playerInstance.transform);
+                mainCamera = Camera.main;
+            }
+            
+            if (mainCamera != null && playerInstance != null)
+            {
+                // Setup camera follow if using GravityCameraController
+                var cameraController = mainCamera.GetComponent<GravityCameraController>();
+                if (cameraController != null)
+                {
+                    cameraController.SetTarget(playerInstance.transform);
+                }
             }
         }
         
         private void InitializeSceneSystems()
         {
-            // Scene-specific initialization
+            // Initialize any scene-specific systems here
+            Debug.Log("[MainGame] Scene systems initialized");
+        }
+        
+        private void OnDestroy()
+        {
+            // Cleanup if needed
         }
     }
 }
