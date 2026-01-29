@@ -2,6 +2,7 @@ using System;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using SkyRingTerrarium.World;
 
 namespace SkyRingTerrarium.UI
 {
@@ -34,7 +35,7 @@ namespace SkyRingTerrarium.UI
         public event Action OnProgressCollected;
         public event Action OnPopupClosed;
 
-        private OfflineProgressReport currentReport;
+        private OfflineProgressionReport currentReport;
 
         private void Start()
         {
@@ -47,7 +48,7 @@ namespace SkyRingTerrarium.UI
             OfflineProgressionManager offlineMgr = FindFirstObjectByType<OfflineProgressionManager>();
             if (offlineMgr != null)
             {
-                offlineMgr.OnOfflineProgressCalculated += ShowReport;
+                offlineMgr.OnOfflineProgressionComplete += ShowReport;
             }
 
             // Start hidden
@@ -56,7 +57,7 @@ namespace SkyRingTerrarium.UI
 
         #region Public API
 
-        public void ShowReport(OfflineProgressReport report)
+        public void ShowReport(OfflineProgressionReport report)
         {
             if (report == null || report.TimeAwaySeconds < 60f)
             {
@@ -102,7 +103,7 @@ namespace SkyRingTerrarium.UI
 
         #region UI Population
 
-        private void PopulateUI(OfflineProgressReport report)
+        private void PopulateUI(OfflineProgressionReport report)
         {
             if (titleText != null)
             {
@@ -158,7 +159,7 @@ namespace SkyRingTerrarium.UI
             }
         }
 
-        private string GetCreatureActivityText(OfflineProgressReport report)
+        private string GetCreatureActivityText(OfflineProgressionReport report)
         {
             if (report.CreaturesBorn > 0 && report.CreaturesDied > 0)
             {
@@ -194,7 +195,7 @@ namespace SkyRingTerrarium.UI
             StartCoroutine(FadeOutAndClose());
         }
 
-        private void ApplyProgress(OfflineProgressReport report)
+        private void ApplyProgress(OfflineProgressionReport report)
         {
             // Add currency
             UpgradeManager.Instance?.AddCurrency(report.CurrencyEarned);
@@ -249,7 +250,7 @@ namespace SkyRingTerrarium.UI
             OfflineProgressionManager offlineMgr = FindFirstObjectByType<OfflineProgressionManager>();
             if (offlineMgr != null)
             {
-                offlineMgr.OnOfflineProgressCalculated -= ShowReport;
+                offlineMgr.OnOfflineProgressionComplete -= ShowReport;
             }
         }
     }
