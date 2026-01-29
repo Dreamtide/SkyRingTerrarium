@@ -60,32 +60,18 @@ namespace SkyRingTerrarium.Core
             Instance = this;
             DontDestroyOnLoad(gameObject);
 
-            InitializeAudioSources();
-            InitializeSoundPools();
+            InitializeAudioPools();
             InitializeSoundLibrary();
         }
 
-        private void Start()
+        private void OnEnable()
         {
-            // Subscribe to world events
-            WorldTimeManager timeManager = FindFirstObjectByType<WorldTimeManager>();
-            if (timeManager != null)
-            {
-                timeManager.OnDayNightChanged += HandleDayNightChange;
-            }
+            SubscribeToEvents();
+        }
 
-            WeatherSystem weather = FindFirstObjectByType<WeatherSystem>();
-            if (weather != null)
-            {
-                weather.OnWeatherChanged += HandleWeatherChange;
-            }
-
-            WorldEventManager events = FindFirstObjectByType<WorldEventManager>();
-            if (events != null)
-            {
-                events.OnEventStarted += HandleEventStarted;
-                events.OnEventEnded += HandleEventEnded;
-            }
+        private void OnDisable()
+        {
+            UnsubscribeFromEvents();
         }
 
         private void Update()
@@ -93,67 +79,48 @@ namespace SkyRingTerrarium.Core
             UpdateMusicIntensity();
         }
 
-        #region Initialization
-
-        private void InitializeAudioSources()
+        private void SubscribeToEvents()
         {
-            // Create sources if not assigned
-            if (musicSource == null)
-            {
-                GameObject musicObj = new GameObject("MusicSource");
-                musicObj.transform.SetParent(transform);
-                musicSource = musicObj.AddComponent<AudioSource>();
-                musicSource.loop = true;
-                musicSource.playOnAwake = false;
-            }
-
-            if (ambientSource == null)
-            {
-                GameObject ambientObj = new GameObject("AmbientSource");
-                ambientObj.transform.SetParent(transform);
-                ambientSource = ambientObj.AddComponent<AudioSource>();
-                ambientSource.loop = true;
-                ambientSource.playOnAwake = false;
-            }
-
-            if (weatherSource == null)
-            {
-                GameObject weatherObj = new GameObject("WeatherSource");
-                weatherObj.transform.SetParent(transform);
-                weatherSource = weatherObj.AddComponent<AudioSource>();
-                weatherSource.loop = true;
-                weatherSource.playOnAwake = false;
-            }
-
-            if (uiSource == null)
-            {
-                GameObject uiObj = new GameObject("UISource");
-                uiObj.transform.SetParent(transform);
-                uiSource = uiObj.AddComponent<AudioSource>();
-                uiSource.playOnAwake = false;
-            }
+            // Subscribe to time changes
+            WorldTimeManager.OnTimeOfDayPhaseChanged += HandleTimeOfDayChanged;
+            
+            // Subscribe to weather changes (static events)
+            WeatherSystem.OnWeatherChanged += HandleWeatherChanged;
+            
+            // Subscribe to world events (static events)
+            WorldEventManager.OnEventStarted += HandleEventStarted;
+            WorldEventManager.OnEventEnded += HandleEventEnded;
         }
 
-        private void InitializeSoundPools()
+        private void UnsubscribeFromEvents()
+        {
+            WorldTimeManager.OnTimeOfDayPhaseChanged -= HandleTimeOfDayChanged;
+            WeatherSystem.OnWeatherChanged -= HandleWeatherChanged;
+            WorldEventManager.OnEventStarted -= HandleEventStarted;
+            WorldEventManager.OnEventEnded -= HandleEventEnded;
+        }
+
+        private void InitializeAudioPools()
         {
             sfxPool = new List<AudioSource>();
+            creatureSoundPool = new List<AudioSource>();
+
+            GameObject sfxPoolParent = new GameObject("SFX Pool");
+            sfxPoolParent.transform.SetParent(transform);
             for (int i = 0; i < sfxPoolSize; i++)
             {
-                GameObject sfxObj = new GameObject($"SFXSource_{i}");
-                sfxObj.transform.SetParent(transform);
-                AudioSource source = sfxObj.AddComponent<AudioSource>();
+                AudioSource source = sfxPoolParent.AddComponent<AudioSource>();
                 source.playOnAwake = false;
                 sfxPool.Add(source);
             }
 
-            creatureSoundPool = new List<AudioSource>();
+            GameObject creaturePoolParent = new GameObject("Creature Sound Pool");
+            creaturePoolParent.transform.SetParent(transform);
             for (int i = 0; i < creaturePoolSize; i++)
             {
-                GameObject creatureObj = new GameObject($"CreatureSource_{i}");
-                creatureObj.transform.SetParent(transform);
-                AudioSource source = creatureObj.AddComponent<AudioSource>();
+                AudioSource source = creaturePoolParent.AddComponent<AudioSource>();
                 source.playOnAwake = false;
-                source.spatialBlend = 1f; // 3D sound
+                source.spatialBlend = 1f;
                 creatureSoundPool.Add(source);
             }
         }
@@ -161,260 +128,174 @@ namespace SkyRingTerrarium.Core
         private void InitializeSoundLibrary()
         {
             soundLibrary = new Dictionary<string, AudioClip>();
-            // Sound library would be populated from ScriptableObject or Resources
-            // This is just the hook infrastructure
+            // Clips would be loaded here in a full implementation
         }
 
-        #endregion
+        private void UpdateMusicIntensity()
+        {
+            if (Mathf.Abs(currentMusicIntensity - targetMusicIntensity) > 0.001f)
+            {
+                currentMusicIntensity = Mathf.Lerp(currentMusicIntensity, targetMusicIntensity, 
+                    musicIntensityLerpSpeed * Time.deltaTime);
+                OnMusicIntensityChanged?.Invoke(currentMusicIntensity);
+            }
+        }
 
-        #region Volume Control
+        // Event handlers with correct signatures
+        private void HandleTimeOfDayChanged(WorldTimeManager.TimeOfDay timeOfDay)
+        {
+            // Adjust ambient audio based on time of day
+            switch (timeOfDay)
+            {
+                case WorldTimeManager.TimeOfDay.Dawn:
+                    targetMusicIntensity = 0.3f;
+                    break;
+                case WorldTimeManager.TimeOfDay.Day:
+                    targetMusicIntensity = 0.5f;
+                    break;
+                case WorldTimeManager.TimeOfDay.Dusk:
+                    targetMusicIntensity = 0.4f;
+                    break;
+                case WorldTimeManager.TimeOfDay.Night:
+                    targetMusicIntensity = 0.2f;
+                    break;
+            }
+        }
+
+        private void HandleWeatherChanged(WeatherSystem.WeatherState weatherState)
+        {
+            // Adjust weather audio
+            switch (weatherState)
+            {
+                case WeatherSystem.WeatherState.Clear:
+                    if (weatherSource != null) weatherSource.volume = 0.1f;
+                    break;
+                case WeatherSystem.WeatherState.Windy:
+                    if (weatherSource != null) weatherSource.volume = 0.5f;
+                    break;
+                case WeatherSystem.WeatherState.Stormy:
+                    if (weatherSource != null) weatherSource.volume = 1f;
+                    targetMusicIntensity = Mathf.Max(targetMusicIntensity, 0.7f);
+                    break;
+                case WeatherSystem.WeatherState.Calm:
+                    if (weatherSource != null) weatherSource.volume = 0.05f;
+                    break;
+                case WeatherSystem.WeatherState.Misty:
+                    if (weatherSource != null) weatherSource.volume = 0.3f;
+                    break;
+            }
+        }
+
+        private void HandleEventStarted(WorldEvent worldEvent)
+        {
+            // Increase music intensity during events
+            targetMusicIntensity = Mathf.Max(targetMusicIntensity, 0.8f);
+            Debug.Log($"[Audio] Event started: {worldEvent.Type}");
+        }
+
+        private void HandleEventEnded(WorldEvent worldEvent)
+        {
+            // Return to normal intensity
+            targetMusicIntensity = 0.5f;
+            Debug.Log($"[Audio] Event ended: {worldEvent.Type}");
+        }
+
+        #region Public API
+
+        public void PlaySound(string soundName)
+        {
+            if (soundLibrary.TryGetValue(soundName, out AudioClip clip))
+            {
+                AudioSource source = GetAvailableSource(sfxPool);
+                if (source != null)
+                {
+                    source.clip = clip;
+                    source.volume = sfxVolume * masterVolume;
+                    source.Play();
+                    OnSoundPlayed?.Invoke(soundName);
+                }
+            }
+        }
+
+        public void PlaySoundAtPosition(string soundName, Vector3 position)
+        {
+            if (soundLibrary.TryGetValue(soundName, out AudioClip clip))
+            {
+                AudioSource.PlayClipAtPoint(clip, position, sfxVolume * masterVolume);
+                OnSoundPlayed?.Invoke(soundName);
+            }
+        }
+
+        public void PlayCreatureSound(AudioClip clip, Vector3 position, float volume = 1f)
+        {
+            AudioSource source = GetAvailableSource(creatureSoundPool);
+            if (source != null)
+            {
+                source.transform.position = position;
+                source.clip = clip;
+                source.volume = volume * sfxVolume * masterVolume;
+                source.Play();
+            }
+        }
+
+        public void PlayUISound(string soundName)
+        {
+            if (uiSource != null && soundLibrary.TryGetValue(soundName, out AudioClip clip))
+            {
+                uiSource.PlayOneShot(clip, sfxVolume * masterVolume);
+                OnSoundPlayed?.Invoke(soundName);
+            }
+        }
 
         public void SetMasterVolume(float volume)
         {
             masterVolume = Mathf.Clamp01(volume);
-            ApplyVolumes();
+            UpdateMixerVolumes();
         }
 
         public void SetMusicVolume(float volume)
         {
             musicVolume = Mathf.Clamp01(volume);
-            ApplyVolumes();
+            if (musicSource != null)
+            {
+                musicSource.volume = musicVolume * masterVolume;
+            }
         }
 
         public void SetSFXVolume(float volume)
         {
             sfxVolume = Mathf.Clamp01(volume);
-            ApplyVolumes();
         }
 
         public void SetAmbientVolume(float volume)
         {
             ambientVolume = Mathf.Clamp01(volume);
-            ApplyVolumes();
-        }
-
-        private void ApplyVolumes()
-        {
-            if (musicSource != null)
-                musicSource.volume = masterVolume * musicVolume;
             if (ambientSource != null)
-                ambientSource.volume = masterVolume * ambientVolume;
-            if (weatherSource != null)
-                weatherSource.volume = masterVolume * ambientVolume;
-            if (uiSource != null)
-                uiSource.volume = masterVolume * sfxVolume;
+            {
+                ambientSource.volume = ambientVolume * masterVolume;
+            }
         }
 
         #endregion
-
-        #region Sound Playback Hooks
-
-        /// <summary>
-        /// Play a UI sound effect
-        /// </summary>
-        public void PlayUISound(string soundId)
-        {
-            if (soundLibrary.TryGetValue(soundId, out AudioClip clip))
-            {
-                uiSource.PlayOneShot(clip, masterVolume * sfxVolume);
-            }
-            OnSoundPlayed?.Invoke($"ui_{soundId}");
-            Debug.Log($"[Audio] UI Sound hook: {soundId}");
-        }
-
-        /// <summary>
-        /// Play a one-shot SFX
-        /// </summary>
-        public void PlaySFX(string soundId, Vector3 position = default)
-        {
-            AudioSource source = GetAvailableSource(sfxPool);
-            if (source != null && soundLibrary.TryGetValue(soundId, out AudioClip clip))
-            {
-                source.transform.position = position;
-                source.clip = clip;
-                source.volume = masterVolume * sfxVolume;
-                source.Play();
-            }
-            OnSoundPlayed?.Invoke($"sfx_{soundId}");
-            Debug.Log($"[Audio] SFX hook: {soundId}");
-        }
-
-        /// <summary>
-        /// Play creature sound at position
-        /// </summary>
-        public void PlayCreatureSound(string creatureType, string soundType, Vector3 position)
-        {
-            string soundId = $"{creatureType}_{soundType}";
-            AudioSource source = GetAvailableSource(creatureSoundPool);
-            if (source != null && soundLibrary.TryGetValue(soundId, out AudioClip clip))
-            {
-                source.transform.position = position;
-                source.clip = clip;
-                source.volume = masterVolume * sfxVolume;
-                source.Play();
-            }
-            OnSoundPlayed?.Invoke($"creature_{soundId}");
-            Debug.Log($"[Audio] Creature sound hook: {soundId} at {position}");
-        }
-
-        /// <summary>
-        /// Set ambient loop for day/night
-        /// </summary>
-        public void SetAmbientLoop(string ambientId)
-        {
-            if (soundLibrary.TryGetValue(ambientId, out AudioClip clip))
-            {
-                CrossfadeAudioSource(ambientSource, clip);
-            }
-            Debug.Log($"[Audio] Ambient hook: {ambientId}");
-        }
-
-        /// <summary>
-        /// Set weather ambient loop
-        /// </summary>
-        public void SetWeatherLoop(string weatherId)
-        {
-            if (string.IsNullOrEmpty(weatherId))
-            {
-                FadeOutSource(weatherSource);
-            }
-            else if (soundLibrary.TryGetValue(weatherId, out AudioClip clip))
-            {
-                CrossfadeAudioSource(weatherSource, clip);
-            }
-            Debug.Log($"[Audio] Weather hook: {weatherId}");
-        }
-
-        /// <summary>
-        /// Play event sound
-        /// </summary>
-        public void PlayEventSound(string eventType, bool isStart)
-        {
-            string soundId = $"event_{eventType}_{(isStart ? "start" : "end")}";
-            PlaySFX(soundId);
-            Debug.Log($"[Audio] Event hook: {soundId}");
-        }
-
-        /// <summary>
-        /// Set music track
-        /// </summary>
-        public void SetMusicTrack(string trackId)
-        {
-            if (soundLibrary.TryGetValue(trackId, out AudioClip clip))
-            {
-                CrossfadeAudioSource(musicSource, clip);
-            }
-            Debug.Log($"[Audio] Music hook: {trackId}");
-        }
-
-        #endregion
-
-        #region Music Intensity
-
-        public void SetMusicIntensity(float intensity)
-        {
-            targetMusicIntensity = Mathf.Clamp01(intensity);
-        }
-
-        private void UpdateMusicIntensity()
-        {
-            if (Mathf.Abs(currentMusicIntensity - targetMusicIntensity) > 0.01f)
-            {
-                currentMusicIntensity = Mathf.Lerp(currentMusicIntensity, targetMusicIntensity,
-                    Time.deltaTime * musicIntensityLerpSpeed);
-                OnMusicIntensityChanged?.Invoke(currentMusicIntensity);
-
-                // Could be used to blend between calm/intense music layers
-                // or adjust music parameters
-            }
-        }
-
-        public float GetMusicIntensity() => currentMusicIntensity;
-
-        #endregion
-
-        #region Event Handlers
-
-        private void HandleDayNightChange(bool isDay)
-        {
-            SetAmbientLoop(isDay ? "ambient_day" : "ambient_night");
-            SetMusicIntensity(isDay ? 0.3f : 0.1f);
-        }
-
-        private void HandleWeatherChange(WeatherSystem.WeatherState weather)
-        {
-            string weatherSound = weather switch
-            {
-                WeatherSystem.WeatherState.Clear => null,
-                WeatherSystem.WeatherState.Windy => "weather_wind",
-                WeatherSystem.WeatherState.Stormy => "weather_storm",
-                WeatherSystem.WeatherState.Misty => "weather_motes",
-                WeatherSystem.WeatherState.Calm => "weather_aurora",
-                _ => null
-            };
-            SetWeatherLoop(weatherSound);
-        }
-
-        private void HandleEventStarted(WorldEventManager.WorldEventType eventType)
-        {
-            PlayEventSound(eventType.ToString(), true);
-            SetMusicIntensity(0.8f);
-        }
-
-        private void HandleEventEnded(WorldEventManager.WorldEventType eventType)
-        {
-            PlayEventSound(eventType.ToString(), false);
-            SetMusicIntensity(0.3f);
-        }
-
-        #endregion
-
-        #region Utility
 
         private AudioSource GetAvailableSource(List<AudioSource> pool)
         {
             foreach (var source in pool)
             {
                 if (!source.isPlaying)
+                {
                     return source;
+                }
             }
             return pool.Count > 0 ? pool[0] : null;
         }
 
-        private void CrossfadeAudioSource(AudioSource source, AudioClip newClip)
+        private void UpdateMixerVolumes()
         {
-            // Simple crossfade - could be expanded with coroutine
-            if (source.clip == newClip) return;
-            source.clip = newClip;
-            source.Play();
-        }
-
-        private void FadeOutSource(AudioSource source)
-        {
-            source.Stop();
-        }
-
-        #endregion
-
-        private void OnDestroy()
-        {
-            WorldTimeManager timeManager = FindFirstObjectByType<WorldTimeManager>();
-            if (timeManager != null)
+            if (masterMixer != null)
             {
-                timeManager.OnDayNightChanged -= HandleDayNightChange;
-            }
-
-            WeatherSystem weather = FindFirstObjectByType<WeatherSystem>();
-            if (weather != null)
-            {
-                weather.OnWeatherChanged -= HandleWeatherChange;
-            }
-
-            WorldEventManager events = FindFirstObjectByType<WorldEventManager>();
-            if (events != null)
-            {
-                events.OnEventStarted -= HandleEventStarted;
-                events.OnEventEnded -= HandleEventEnded;
+                float dbVolume = masterVolume > 0 ? 20f * Mathf.Log10(masterVolume) : -80f;
+                masterMixer.SetFloat("MasterVolume", dbVolume);
             }
         }
     }
