@@ -1,6 +1,7 @@
 #if UNITY_EDITOR
 using UnityEngine;
 using UnityEditor;
+using SkyRingTerrarium; // Added for GameBalanceConfig, GravityConfig, EconomyConfig, PlayerController
 
 namespace SkyRingTerrarium.Editor
 {
@@ -45,9 +46,17 @@ namespace SkyRingTerrarium.Editor
             {
                 if (!AssetDatabase.IsValidFolder(folder))
                 {
-                    string parent = System.IO.Path.GetDirectoryName(folder);
-                    string name = System.IO.Path.GetFileName(folder);
-                    AssetDatabase.CreateFolder(parent, name);
+                    string[] parts = folder.Split('/');
+                    string currentPath = parts[0];
+                    for (int i = 1; i < parts.Length; i++)
+                    {
+                        string parentPath = currentPath;
+                        currentPath = currentPath + "/" + parts[i];
+                        if (!AssetDatabase.IsValidFolder(currentPath))
+                        {
+                            AssetDatabase.CreateFolder(parentPath, parts[i]);
+                        }
+                    }
                 }
             }
             
@@ -92,11 +101,6 @@ namespace SkyRingTerrarium.Editor
             groundCheck.transform.SetParent(player.transform);
             groundCheck.transform.localPosition = new Vector3(0, -0.5f, 0);
             
-            // Create ceiling check
-            GameObject ceilingCheck = new GameObject("CeilingCheck");
-            ceilingCheck.transform.SetParent(player.transform);
-            ceilingCheck.transform.localPosition = new Vector3(0, 0.5f, 0);
-            
             // Setup Rigidbody2D
             var rb = player.GetComponent<Rigidbody2D>();
             rb.gravityScale = 1f;
@@ -109,7 +113,7 @@ namespace SkyRingTerrarium.Editor
             // Save prefab
             string prefabPath = "Assets/SkyRingTerrarium/Prefabs/Player/Player.prefab";
             PrefabUtility.SaveAsPrefabAsset(player, prefabPath);
-            DestroyImmediate(player);
+            Object.DestroyImmediate(player);
             
             Debug.Log("[SkyRing Setup] Player prefab created!");
         }
