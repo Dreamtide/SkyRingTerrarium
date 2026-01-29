@@ -31,7 +31,7 @@ namespace SkyRingTerrarium.Core
 
         private void FixedUpdate()
         {
-            var orbitalBodies = FindObjectsOfType<OrbitalBody>();
+            var orbitalBodies = FindObjectsByType<OrbitalBody>(FindObjectsSortMode.None);
             foreach (var body in orbitalBodies)
             {
                 UpdateOrbitalMechanics(body);
