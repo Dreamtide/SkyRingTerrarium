@@ -290,27 +290,37 @@ namespace SkyRingTerrarium.Core
         }
 
         #endregion
-    }
 
-    public enum UpgradeType
-    {
-        MoteDensity,
-        WindStrength,
-        EventFrequency,
-        DrifterSpeed,
-        DrifterCount,
-        FloatBandStability
-    }
+        #region Nested Types
 
-    [Serializable]
-    public class UpgradeDefinition
-    {
-        public string Name;
-        public string Description;
-        public int MaxLevel;
-        public int BaseCost;
-        public float CostMultiplier;
-        public float BaseValue;
-        public float ValuePerLevel;
+        /// <summary>
+        /// The 6 MVP upgrade types available in the game.
+        /// </summary>
+        public enum UpgradeType
+        {
+            MoteDensity,
+            WindStrength,
+            EventFrequency,
+            DrifterSpeed,
+            DrifterCount,
+            FloatBandStability
+        }
+
+        /// <summary>
+        /// Definition of an upgrade including cost scaling and value effects.
+        /// </summary>
+        [Serializable]
+        public class UpgradeDefinition
+        {
+            public string Name;
+            public string Description;
+            public int MaxLevel;
+            public int BaseCost;
+            public float CostMultiplier;
+            public float BaseValue;
+            public float ValuePerLevel;
+        }
+
+        #endregion
     }
 }
