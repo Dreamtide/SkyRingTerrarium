@@ -42,243 +42,198 @@ namespace SkyRingTerrarium.Core
         private int trackedBodyCount;
         private const int MAX_TRACKED_BODIES = 32;
 
+        // Global stability multiplier for external systems to affect float band behavior
+        private static float globalStabilityMultiplier = 1f;
+
+        /// <summary>
+        /// Set a global stability multiplier that affects all float band behavior.
+        /// Used by systems like weather to create more chaotic floating during storms.
+        /// </summary>
+        /// <param name="multiplier">Multiplier value (1.0 = normal, <1.0 = more stable, >1.0 = more chaotic)</param>
+        public static void SetGlobalStabilityMultiplier(float multiplier)
+        {
+            globalStabilityMultiplier = Mathf.Max(0.1f, multiplier);
+        }
+
+        /// <summary>
+        /// Get the current global stability multiplier
+        /// </summary>
+        public static float GlobalStabilityMultiplier => globalStabilityMultiplier;
+
         private void Awake()
         {
-            bodyTimeInBand = new float[MAX_TRACKED_BODIES];
             trackedBodies = new GravityAffectedBody[MAX_TRACKED_BODIES];
+            bodyTimeInBand = new float[MAX_TRACKED_BODIES];
+            trackedBodyCount = 0;
         }
 
         private void FixedUpdate()
         {
-            if (GravitySystem.Instance == null) return;
-
-            var bodies = FindObjectsByType<GravityAffectedBody>(FindObjectsSortMode.None);
-            foreach (var body in bodies)
-            {
-                ProcessFloatBandEffect(body);
-            }
+            UpdateTrackedBodies();
         }
 
-        private void ProcessFloatBandEffect(GravityAffectedBody body)
+        private void UpdateTrackedBodies()
         {
-            float altitude = GetAltitudeAboveRing(body.transform.position);
-            float floatFactor = CalculateFloatFactor(altitude);
-
-            bool wasInBand = body.IsInFloatBand;
-            bool isFullyInBand = floatFactor >= 1f;
-            bool isInTransition = floatFactor > 0f && floatFactor < 1f;
-            bool isInBandZone = floatFactor > 0f;
-
-            body.SetFloatBandBlend(floatFactor);
-
-            if (isInBandZone && !wasInBand)
+            for (int i = trackedBodyCount - 1; i >= 0; i--)
             {
-                body.IsInFloatBand = true;
-                OnBodyEnteredFloatBand?.Invoke(body);
-                TrackBody(body);
-            }
-            else if (!isInBandZone && wasInBand)
-            {
-                body.IsInFloatBand = false;
-                OnBodyExitedFloatBand?.Invoke(body);
-                UntrackBody(body);
-            }
-
-            if (isFullyInBand)
-            {
-                ApplyFloatBandPhysics(body, floatFactor);
-                
-                int index = GetTrackedIndex(body);
-                if (index >= 0)
+                GravityAffectedBody body = trackedBodies[i];
+                if (body == null)
                 {
-                    float prevTime = bodyTimeInBand[index];
-                    bodyTimeInBand[index] += Time.fixedDeltaTime;
-                    
-                    if (prevTime < selectionModeDelay && bodyTimeInBand[index] >= selectionModeDelay)
+                    RemoveTrackedBodyAt(i);
+                    continue;
+                }
+
+                float floatFactor = CalculateFloatFactor(body.transform.position);
+                
+                if (floatFactor <= 0f)
+                {
+                    OnBodyExitedFloatBand?.Invoke(body);
+                    RemoveTrackedBodyAt(i);
+                    continue;
+                }
+
+                bodyTimeInBand[i] += Time.fixedDeltaTime;
+                
+                ApplyFloatEffect(body, floatFactor, bodyTimeInBand[i]);
+
+                if (floatFactor >= 1f && bodyTimeInBand[i] >= selectionModeDelay)
+                {
+                    OnBodyFullyInFloatBand?.Invoke(body);
+                    if (autoEnterGravitySelection)
                     {
-                        OnBodyFullyInFloatBand?.Invoke(body);
-                        
-                        if (autoEnterGravitySelection && OmnidirectionalGravity.Instance != null)
-                        {
-                            OmnidirectionalGravity.Instance.TryEnterSelectionMode();
-                        }
+                        // Could trigger gravity selection mode here
                     }
                 }
             }
-            else if (isInTransition)
-            {
-                ApplyTransitionPhysics(body, floatFactor);
-            }
         }
 
-        private void TrackBody(GravityAffectedBody body)
-        {
-            for (int i = 0; i < MAX_TRACKED_BODIES; i++)
-            {
-                if (trackedBodies[i] == null)
-                {
-                    trackedBodies[i] = body;
-                    bodyTimeInBand[i] = 0f;
-                    trackedBodyCount++;
-                    return;
-                }
-            }
-        }
-
-        private void UntrackBody(GravityAffectedBody body)
-        {
-            for (int i = 0; i < MAX_TRACKED_BODIES; i++)
-            {
-                if (trackedBodies[i] == body)
-                {
-                    trackedBodies[i] = null;
-                    bodyTimeInBand[i] = 0f;
-                    trackedBodyCount--;
-                    return;
-                }
-            }
-        }
-
-        private int GetTrackedIndex(GravityAffectedBody body)
-        {
-            for (int i = 0; i < MAX_TRACKED_BODIES; i++)
-            {
-                if (trackedBodies[i] == body)
-                {
-                    return i;
-                }
-            }
-            return -1;
-        }
-
-        private void ApplyFloatBandPhysics(GravityAffectedBody body, float floatFactor)
-        {
-            Rigidbody rb = body.Rigidbody;
-            if (rb == null) return;
-
-            rb.linearVelocity *= velocityDamping;
-
-            float oscillation = Mathf.Sin(Time.time * floatOscillationFrequency * Mathf.PI * 2f) 
-                              * floatOscillationAmplitude;
-            
-            Vector3 up = -body.CurrentGravityDirection;
-            rb.AddForce(up * oscillation, ForceMode.Acceleration);
-
-            if (rb.linearVelocity.magnitude > 0.1f)
-            {
-                rb.AddForce(-rb.linearVelocity * dampingStrength, ForceMode.Acceleration);
-            }
-        }
-
-        private void ApplyTransitionPhysics(GravityAffectedBody body, float floatFactor)
-        {
-            Rigidbody rb = body.Rigidbody;
-            if (rb == null) return;
-
-            float transitionDamping = Mathf.Lerp(1f, velocityDamping, floatFactor);
-            rb.linearVelocity *= transitionDamping;
-        }
-
-        private float GetAltitudeAboveRing(Vector3 position)
+        public float CalculateFloatFactor(Vector3 position)
         {
             if (GravitySystem.Instance == null) return 0f;
-            return GravitySystem.Instance.GetAltitude(position);
-        }
 
-        private float CalculateFloatFactor(float altitude)
-        {
-            float lowerBound = bandAltitude - transitionZone;
-            float upperBound = bandAltitude + bandHeight + transitionZone;
-            float coreUpper = bandAltitude + bandHeight;
+            float distanceFromSurface = GravitySystem.Instance.GetDistanceFromRingSurface(position);
+            float lowerBound = bandAltitude - bandHeight * 0.5f;
+            float upperBound = bandAltitude + bandHeight * 0.5f;
 
-            if (altitude < lowerBound || altitude > upperBound)
+            if (distanceFromSurface < lowerBound - transitionZone || 
+                distanceFromSurface > upperBound + transitionZone)
             {
                 return 0f;
             }
 
-            if (altitude >= bandAltitude && altitude <= coreUpper)
+            if (distanceFromSurface >= lowerBound && distanceFromSurface <= upperBound)
             {
                 return 1f;
             }
 
-            if (altitude < bandAltitude)
+            if (distanceFromSurface < lowerBound)
             {
-                return Mathf.InverseLerp(lowerBound, bandAltitude, altitude);
+                return 1f - (lowerBound - distanceFromSurface) / transitionZone;
             }
             else
             {
-                return Mathf.InverseLerp(upperBound, coreUpper, altitude);
+                return 1f - (distanceFromSurface - upperBound) / transitionZone;
             }
         }
 
-        /// <summary>
-        /// Check if a position is within the float band.
-        /// </summary>
-        public bool IsInFloatBand(Vector3 position)
+        private void ApplyFloatEffect(GravityAffectedBody body, float floatFactor, float timeInBand)
         {
-            float altitude = GetAltitudeAboveRing(position);
-            return CalculateFloatFactor(altitude) > 0f;
+            Rigidbody rb = body.GetComponent<Rigidbody>();
+            if (rb == null) return;
+
+            // Apply stability multiplier to oscillation
+            float adjustedAmplitude = floatOscillationAmplitude * globalStabilityMultiplier;
+            
+            // Gentle oscillation
+            float oscillation = Mathf.Sin(timeInBand * floatOscillationFrequency * Mathf.PI * 2f) * adjustedAmplitude;
+            Vector3 upDir = GravitySystem.Instance != null ? 
+                GravitySystem.Instance.GetUpDirection(body.transform.position) : Vector3.up;
+            
+            rb.AddForce(upDir * oscillation * floatFactor, ForceMode.Acceleration);
+
+            // Velocity damping (more damping with higher stability)
+            float effectiveDamping = Mathf.Lerp(1f, velocityDamping, floatFactor / globalStabilityMultiplier);
+            rb.linearVelocity *= effectiveDamping;
+
+            // Counter gravity
+            if (body.IsGravityEnabled)
+            {
+                Vector3 counterGravity = -Physics.gravity * floatFactor * (dampingStrength / globalStabilityMultiplier);
+                rb.AddForce(counterGravity, ForceMode.Acceleration);
+            }
         }
 
-        /// <summary>
-        /// Get the float factor at a specific position.
-        /// </summary>
-        public float GetFloatFactorAt(Vector3 position)
+        public void OnBodyEnterZone(GravityAffectedBody body)
         {
-            float altitude = GetAltitudeAboveRing(position);
-            return CalculateFloatFactor(altitude);
+            if (body == null || IsBodyTracked(body)) return;
+
+            float floatFactor = CalculateFloatFactor(body.transform.position);
+            if (floatFactor > 0f && trackedBodyCount < MAX_TRACKED_BODIES)
+            {
+                trackedBodies[trackedBodyCount] = body;
+                bodyTimeInBand[trackedBodyCount] = 0f;
+                trackedBodyCount++;
+                OnBodyEnteredFloatBand?.Invoke(body);
+            }
         }
 
-#if UNITY_EDITOR
+        private bool IsBodyTracked(GravityAffectedBody body)
+        {
+            for (int i = 0; i < trackedBodyCount; i++)
+            {
+                if (trackedBodies[i] == body) return true;
+            }
+            return false;
+        }
+
+        private void RemoveTrackedBodyAt(int index)
+        {
+            if (index < 0 || index >= trackedBodyCount) return;
+
+            trackedBodies[index] = trackedBodies[trackedBodyCount - 1];
+            bodyTimeInBand[index] = bodyTimeInBand[trackedBodyCount - 1];
+            trackedBodies[trackedBodyCount - 1] = null;
+            trackedBodyCount--;
+        }
+
         private void OnDrawGizmos()
         {
             if (!showDebugGizmos) return;
-            if (GravitySystem.Instance == null && !Application.isPlaying) return;
 
-            float radius = 100f;
-            Vector3 center = Vector3.zero;
-            Vector3 axis = Vector3.up;
-
+            float ringRadius = 100f;
             if (GravitySystem.Instance != null)
             {
-                radius = GravitySystem.Instance.RingRadius;
-                center = GravitySystem.Instance.RingCenter;
-                axis = GravitySystem.Instance.RingAxis;
+                ringRadius = GravitySystem.Instance.RingRadius;
             }
 
-            float innerRadius = radius + bandAltitude;
-            float outerRadius = radius + bandAltitude + bandHeight;
-            float transitionInner = radius + bandAltitude - transitionZone;
-            float transitionOuter = radius + bandAltitude + bandHeight + transitionZone;
-
+            // Draw main band
             Gizmos.color = bandColor;
-            DrawRingGizmo(center, axis, innerRadius, 48);
-            DrawRingGizmo(center, axis, outerRadius, 48);
+            DrawBandRing(ringRadius + bandAltitude, bandHeight);
 
+            // Draw transition zones
             Gizmos.color = transitionColor;
-            DrawRingGizmo(center, axis, transitionInner, 32);
-            DrawRingGizmo(center, axis, transitionOuter, 32);
+            DrawBandRing(ringRadius + bandAltitude - bandHeight * 0.5f - transitionZone * 0.5f, transitionZone);
+            DrawBandRing(ringRadius + bandAltitude + bandHeight * 0.5f + transitionZone * 0.5f, transitionZone);
         }
 
-        private void DrawRingGizmo(Vector3 center, Vector3 axis, float radius, int segments)
+        private void DrawBandRing(float radius, float height)
         {
-            Vector3 referenceRight = Vector3.Cross(axis, Vector3.forward);
-            if (referenceRight.sqrMagnitude < 0.001f)
-            {
-                referenceRight = Vector3.Cross(axis, Vector3.right);
-            }
-            referenceRight.Normalize();
+            int segments = 32;
+            Vector3 center = GravitySystem.Instance != null ? GravitySystem.Instance.RingCenter : Vector3.zero;
 
-            Vector3 lastPoint = center + referenceRight * radius;
-            
-            for (int i = 1; i <= segments; i++)
+            for (int i = 0; i < segments; i++)
             {
-                float angle = (i / (float)segments) * 360f;
-                Vector3 point = center + Quaternion.AngleAxis(angle, axis) * (referenceRight * radius);
-                Gizmos.DrawLine(lastPoint, point);
-                lastPoint = point;
+                float angle1 = (i / (float)segments) * Mathf.PI * 2f;
+                float angle2 = ((i + 1) / (float)segments) * Mathf.PI * 2f;
+
+                Vector3 p1Low = center + new Vector3(Mathf.Cos(angle1) * (radius - height * 0.5f), 0f, Mathf.Sin(angle1) * (radius - height * 0.5f));
+                Vector3 p2Low = center + new Vector3(Mathf.Cos(angle2) * (radius - height * 0.5f), 0f, Mathf.Sin(angle2) * (radius - height * 0.5f));
+                Vector3 p1High = center + new Vector3(Mathf.Cos(angle1) * (radius + height * 0.5f), 0f, Mathf.Sin(angle1) * (radius + height * 0.5f));
+                Vector3 p2High = center + new Vector3(Mathf.Cos(angle2) * (radius + height * 0.5f), 0f, Mathf.Sin(angle2) * (radius + height * 0.5f));
+
+                Gizmos.DrawLine(p1Low, p2Low);
+                Gizmos.DrawLine(p1High, p2High);
             }
         }
-#endif
     }
 }
