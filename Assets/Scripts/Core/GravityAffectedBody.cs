@@ -13,6 +13,7 @@ namespace SkyRingTerrarium.Core
         [SerializeField] private float gravityScale = 1f;
         [SerializeField] private bool useCustomGravity = true;
         [SerializeField] private bool allowDirectionOverride = true;
+        [SerializeField] private bool gravityEnabled = true;
         
         [Header("State")]
         [SerializeField] private bool isInFloatBand = false;
@@ -40,6 +41,12 @@ namespace SkyRingTerrarium.Core
             set => useCustomGravity = value; 
         }
         
+        public bool IsGravityEnabled
+        {
+            get => gravityEnabled && useCustomGravity;
+            set => gravityEnabled = value;
+        }
+        
         public bool IsInFloatBand 
         { 
             get => isInFloatBand; 
@@ -61,7 +68,6 @@ namespace SkyRingTerrarium.Core
         {
             rb = GetComponent<Rigidbody>();
             rb.useGravity = false;
-            currentGravityDirection = Vector3.down;
         }
 
         private void OnEnable()
@@ -82,9 +88,8 @@ namespace SkyRingTerrarium.Core
 
         private void FixedUpdate()
         {
-            if (!useCustomGravity || isInOrbit) return;
-
-            UpdateGravityDirection();
+            if (!useCustomGravity || !gravityEnabled) return;
+            
             ApplyGravity();
             
             if (autoAlignToGravity)
@@ -93,118 +98,65 @@ namespace SkyRingTerrarium.Core
             }
         }
 
-        private void UpdateGravityDirection()
+        private void ApplyGravity()
         {
+            if (GravitySystem.Instance == null) return;
+            
+            Vector3 gravityDirection;
+            
             if (hasCustomDirection && allowDirectionOverride)
             {
-                currentGravityDirection = customGravityDirection;
-            }
-            else if (GravitySystem.Instance != null)
-            {
-                currentGravityDirection = GravitySystem.Instance.GetGravityDirection(transform.position);
+                gravityDirection = customGravityDirection;
             }
             else
             {
-                currentGravityDirection = Vector3.down;
+                gravityDirection = GravitySystem.Instance.GetGravityDirection(transform.position);
             }
-        }
-
-        private void ApplyGravity()
-        {
+            
+            currentGravityDirection = gravityDirection;
+            
+            float effectiveScale = gravityScale;
             if (isInFloatBand)
             {
-                return;
+                effectiveScale *= (1f - floatBandBlend);
             }
-
-            float strength = GravitySystem.Instance != null 
-                ? GravitySystem.Instance.GravityStrength 
-                : 9.81f;
-
-            float effectiveStrength = strength * gravityScale * (1f - floatBandBlend);
-            Vector3 gravityForce = currentGravityDirection * effectiveStrength;
             
-            rb.AddForce(gravityForce, ForceMode.Acceleration);
+            Vector3 gravity = GravitySystem.Instance.CalculateGravity(transform.position);
+            rb.AddForce(gravity * effectiveScale, ForceMode.Acceleration);
         }
 
         private void AlignToGravity()
         {
-            Vector3 up = -currentGravityDirection;
-            Vector3 forward = transform.forward;
+            if (currentGravityDirection.sqrMagnitude < 0.001f) return;
             
-            Vector3 projectedForward = Vector3.ProjectOnPlane(forward, up);
-            if (projectedForward.sqrMagnitude < 0.001f)
-            {
-                projectedForward = Vector3.ProjectOnPlane(transform.right, up);
-            }
-            
-            Quaternion targetRotation = Quaternion.LookRotation(projectedForward.normalized, up);
+            Quaternion targetRotation = Quaternion.FromToRotation(-transform.up, currentGravityDirection) * transform.rotation;
             transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, alignmentSpeed * Time.fixedDeltaTime);
         }
 
-        /// <summary>
-        /// Set a custom gravity direction, overriding the radial ring gravity.
-        /// Used by OmnidirectionalGravity during and after gravity flips.
-        /// </summary>
         public void SetCustomGravityDirection(Vector3 direction)
         {
             customGravityDirection = direction.normalized;
             hasCustomDirection = true;
-            currentGravityDirection = customGravityDirection;
         }
 
-        /// <summary>
-        /// Clear the custom gravity direction, returning to radial ring gravity.
-        /// </summary>
         public void ClearCustomGravityDirection()
         {
             hasCustomDirection = false;
         }
 
-        /// <summary>
-        /// Set the float band blend factor (0 = full gravity, 1 = zero gravity).
-        /// </summary>
         public void SetFloatBandBlend(float blend)
         {
             floatBandBlend = Mathf.Clamp01(blend);
         }
 
-        /// <summary>
-        /// Temporarily add a force in world space (knockback, explosions, etc.).
-        /// </summary>
-        public void AddWorldForce(Vector3 force, ForceMode mode = ForceMode.Impulse)
+        public void EnableGravity()
         {
-            rb.AddForce(force, mode);
+            gravityEnabled = true;
         }
 
-        /// <summary>
-        /// Add a force relative to current gravity orientation.
-        /// Positive Y is "up" (against gravity).
-        /// </summary>
-        public void AddLocalForce(Vector3 localForce, ForceMode mode = ForceMode.Impulse)
+        public void DisableGravity()
         {
-            Vector3 up = -currentGravityDirection;
-            Vector3 right = Vector3.Cross(up, transform.forward).normalized;
-            Vector3 forward = Vector3.Cross(right, up).normalized;
-
-            Vector3 worldForce = right * localForce.x + up * localForce.y + forward * localForce.z;
-            rb.AddForce(worldForce, mode);
-        }
-
-        /// <summary>
-        /// Get the "up" direction (opposite of gravity).
-        /// </summary>
-        public Vector3 GetUp()
-        {
-            return -currentGravityDirection;
-        }
-
-        /// <summary>
-        /// Check if this body is grounded relative to gravity direction.
-        /// </summary>
-        public bool CheckGrounded(float distance = 0.1f, LayerMask? groundMask = null)
-        {
-            LayerMask mask = groundMask ?? Physics.DefaultRaycastLayers;
-            return Physics.Raycast(transform.position, currentGravityDirection, distance, mask);
+            gravityEnabled = false;
         }
     }
 }
