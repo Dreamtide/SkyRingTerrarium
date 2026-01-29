@@ -53,140 +53,140 @@ namespace SkyRingTerrarium.Core
 
         private void CheckForOrbitEntry(OrbitalBody body)
         {
-            float altitude = GetOrbitalAltitude(body.transform.position);
+            if (GravitySystem.Instance == null) return;
 
-            if (altitude < minOrbitalAltitude || altitude > maxOrbitalAltitude)
-                return;
-
-            float requiredVelocity = CalculateOrbitalVelocity(altitude);
-            float currentTangentialVelocity = GetTangentialVelocity(body);
-
-            if (Mathf.Abs(currentTangentialVelocity - requiredVelocity) / requiredVelocity < (1f - velocityMatchThreshold))
+            float altitude = GravitySystem.Instance.GetDistanceFromRingSurface(body.transform.position);
+            
+            if (altitude >= minOrbitalAltitude && altitude <= maxOrbitalAltitude)
             {
-                EstablishOrbit(body, altitude);
+                Rigidbody rb = body.GetComponent<Rigidbody>();
+                if (rb == null) return;
+
+                Vector3 idealOrbitalVelocity = CalculateIdealOrbitalVelocity(body.transform.position, altitude);
+                float velocityMatch = Vector3.Dot(rb.linearVelocity.normalized, idealOrbitalVelocity.normalized);
+
+                if (velocityMatch >= velocityMatchThreshold)
+                {
+                    EstablishOrbit(body, altitude, rb.linearVelocity.magnitude);
+                }
             }
         }
 
-        private void EstablishOrbit(OrbitalBody body, float altitude)
+        private Vector3 CalculateIdealOrbitalVelocity(Vector3 position, float altitude)
+        {
+            if (GravitySystem.Instance == null) return Vector3.zero;
+            
+            Vector3 gravityDir = GravitySystem.Instance.CalculateGravityDirection(position);
+            Vector3 tangent = Vector3.Cross(gravityDir, Vector3.forward).normalized;
+            
+            float orbitalSpeed = Mathf.Sqrt(GravitySystem.Instance.GravityStrength * altitude) * orbitalVelocityMultiplier;
+            
+            return tangent * orbitalSpeed;
+        }
+
+        private void EstablishOrbit(OrbitalBody body, float altitude, float velocity)
         {
             body.IsInOrbit = true;
             body.OrbitalAltitude = altitude;
-            body.OrbitalVelocity = CalculateOrbitalVelocity(altitude);
-
-            var gravityBody = body.GetComponent<GravityAffectedBody>();
-            if (gravityBody != null)
-                gravityBody.GravityScale = 0f;
+            body.OrbitalVelocity = velocity;
+            body.OrbitStability = 1f;
 
             OnOrbitEstablished?.Invoke(body);
+            Debug.Log($"[OrbitalLoop] {body.name} entered stable orbit at altitude {altitude:F1}");
         }
 
         private void MaintainOrbit(OrbitalBody body)
         {
-            Vector3 position = body.transform.position;
-            float currentAltitude = GetOrbitalAltitude(position);
-            float targetAltitude = body.OrbitalAltitude;
+            Rigidbody rb = body.GetComponent<Rigidbody>();
+            if (rb == null || GravitySystem.Instance == null) return;
 
-            // Altitude correction
-            float altitudeError = targetAltitude - currentAltitude;
-            Vector3 radialDirection = GetRadialDirection(position);
-            Vector3 correctionForce = radialDirection * altitudeError * orbitStabilizationStrength;
+            float currentAltitude = GravitySystem.Instance.GetDistanceFromRingSurface(body.transform.position);
+            float altitudeError = body.OrbitalAltitude - currentAltitude;
 
-            // Velocity maintenance
-            float targetVelocity = body.OrbitalVelocity * orbitalVelocityMultiplier;
-            Vector3 tangentialDirection = GetTangentialDirection(position);
-            float currentSpeed = Vector3.Dot(body.Rigidbody.velocity, tangentialDirection);
-            float speedError = targetVelocity - currentSpeed;
-            Vector3 velocityCorrection = tangentialDirection * speedError * orbitStabilizationStrength;
+            Vector3 gravityDir = GravitySystem.Instance.CalculateGravityDirection(body.transform.position);
+            Vector3 correctionForce = -gravityDir * altitudeError * orbitStabilizationStrength;
+            rb.AddForce(correctionForce, ForceMode.Acceleration);
 
-            body.Rigidbody.AddForce(correctionForce + velocityCorrection, ForceMode.Acceleration);
+            Vector3 idealVelocity = CalculateIdealOrbitalVelocity(body.transform.position, currentAltitude);
+            Vector3 velocityCorrection = (idealVelocity - rb.linearVelocity) * orbitStabilizationStrength * 0.1f;
+            rb.AddForce(velocityCorrection, ForceMode.VelocityChange);
+
+            body.OrbitalAltitude = currentAltitude;
+            body.OrbitalVelocity = rb.linearVelocity.magnitude;
         }
 
         private void CheckForOrbitDecay(OrbitalBody body)
         {
-            float currentAltitude = GetOrbitalAltitude(body.transform.position);
-            float deviation = Mathf.Abs(currentAltitude - body.OrbitalAltitude) / body.OrbitalAltitude;
+            if (GravitySystem.Instance == null) return;
 
-            body.OrbitStability -= orbitDecayRate * deviation * Time.fixedDeltaTime;
+            float altitude = GravitySystem.Instance.GetDistanceFromRingSurface(body.transform.position);
+
+            if (altitude < minOrbitalAltitude || altitude > maxOrbitalAltitude)
+            {
+                body.OrbitStability -= orbitDecayRate * Time.fixedDeltaTime * 10f;
+            }
+            else
+            {
+                Rigidbody rb = body.GetComponent<Rigidbody>();
+                if (rb != null)
+                {
+                    Vector3 idealVelocity = CalculateIdealOrbitalVelocity(body.transform.position, altitude);
+                    float velocityMatch = Vector3.Dot(rb.linearVelocity.normalized, idealVelocity.normalized);
+                    
+                    if (velocityMatch < velocityMatchThreshold * 0.8f)
+                    {
+                        body.OrbitStability -= orbitDecayRate * Time.fixedDeltaTime;
+                    }
+                    else
+                    {
+                        body.OrbitStability = Mathf.Min(1f, body.OrbitStability + orbitDecayRate * Time.fixedDeltaTime * 0.5f);
+                    }
+                }
+            }
 
             if (body.OrbitStability <= 0f)
             {
-                DecayOrbit(body);
+                ExitOrbit(body);
             }
         }
 
-        private void DecayOrbit(OrbitalBody body)
+        private void ExitOrbit(OrbitalBody body)
         {
             body.IsInOrbit = false;
-            body.OrbitStability = 1f;
-
-            var gravityBody = body.GetComponent<GravityAffectedBody>();
-            if (gravityBody != null)
-                gravityBody.GravityScale = 1f;
+            body.OrbitStability = 0f;
 
             OnOrbitDecayed?.Invoke(body);
-        }
-
-        private float GetOrbitalAltitude(Vector3 position)
-        {
-            return GravitySystem.Instance?.GetDistanceFromRingSurface(position) ?? 0f;
-        }
-
-        private float CalculateOrbitalVelocity(float altitude)
-        {
-            if (GravitySystem.Instance == null) return 0f;
-
-            float radius = GravitySystem.Instance.RingRadius + altitude;
-            float gravity = GravitySystem.Instance.GravityStrength;
-
-            return Mathf.Sqrt(gravity * radius);
-        }
-
-        private float GetTangentialVelocity(OrbitalBody body)
-        {
-            Vector3 tangent = GetTangentialDirection(body.transform.position);
-            return Vector3.Dot(body.Rigidbody.velocity, tangent);
-        }
-
-        private Vector3 GetRadialDirection(Vector3 position)
-        {
-            return GravitySystem.Instance?.CalculateGravityDirection(position) ?? Vector3.down;
-        }
-
-        private Vector3 GetTangentialDirection(Vector3 position)
-        {
-            Vector3 radial = GetRadialDirection(position);
-            Vector3 axis = Vector3.up;
-            return Vector3.Cross(radial, axis).normalized;
+            Debug.Log($"[OrbitalLoop] {body.name} orbit decayed");
         }
 
         private void OnDrawGizmos()
         {
-            if (!showOrbitalPaths) return;
+            if (!showOrbitalPaths || GravitySystem.Instance == null) return;
 
             Gizmos.color = orbitColor;
-            DrawOrbitalZone();
-        }
-
-        private void DrawOrbitalZone()
-        {
-            Vector3 center = GravitySystem.Instance?.RingCenter ?? Vector3.zero;
-            float baseRadius = GravitySystem.Instance?.RingRadius ?? 100f;
-
-            DrawOrbitRing(center, baseRadius + minOrbitalAltitude);
-            DrawOrbitRing(center, baseRadius + maxOrbitalAltitude);
-        }
-
-        private void DrawOrbitRing(Vector3 center, float radius)
-        {
+            
             int segments = 64;
+            float minRadius = GravitySystem.Instance.RingRadius + minOrbitalAltitude;
+            float maxRadius = GravitySystem.Instance.RingRadius + maxOrbitalAltitude;
+            
+            DrawOrbitRing(minRadius, segments);
+            
+            Gizmos.color = new Color(orbitColor.r, orbitColor.g, orbitColor.b, 0.5f);
+            DrawOrbitRing(maxRadius, segments);
+        }
+
+        private void DrawOrbitRing(float radius, int segments)
+        {
+            Vector3 center = GravitySystem.Instance != null ? GravitySystem.Instance.RingCenter : Vector3.zero;
+            
             for (int i = 0; i < segments; i++)
             {
-                float a1 = (i / (float)segments) * Mathf.PI * 2;
-                float a2 = ((i + 1) / (float)segments) * Mathf.PI * 2;
-
-                Vector3 p1 = center + new Vector3(Mathf.Cos(a1), 0, Mathf.Sin(a1)) * radius;
-                Vector3 p2 = center + new Vector3(Mathf.Cos(a2), 0, Mathf.Sin(a2)) * radius;
-
+                float angle1 = (i / (float)segments) * Mathf.PI * 2f;
+                float angle2 = ((i + 1) / (float)segments) * Mathf.PI * 2f;
+                
+                Vector3 p1 = center + new Vector3(Mathf.Cos(angle1) * radius, Mathf.Sin(angle1) * radius, 0f);
+                Vector3 p2 = center + new Vector3(Mathf.Cos(angle2) * radius, Mathf.Sin(angle2) * radius, 0f);
+                
                 Gizmos.DrawLine(p1, p2);
             }
         }
