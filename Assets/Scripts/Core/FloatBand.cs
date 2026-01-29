@@ -33,7 +33,7 @@ namespace SkyRingTerrarium.Core
         {
             if (GravitySystem.Instance == null) return;
 
-            var bodies = FindObjectsOfType<GravityAffectedBody>();
+            var bodies = FindObjectsByType<GravityAffectedBody>(FindObjectsSortMode.None);
             foreach (var body in bodies)
             {
                 ProcessFloatBandEffect(body);
