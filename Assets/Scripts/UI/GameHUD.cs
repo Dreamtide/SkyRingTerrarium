@@ -2,6 +2,8 @@ using System;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using SkyRingTerrarium.World;
+using SkyRingTerrarium.Core;
 
 namespace SkyRingTerrarium.UI
 {
@@ -114,7 +116,7 @@ namespace SkyRingTerrarium.UI
             }
         }
 
-        private void UpdateSeasonDisplay(Season season)
+        private void UpdateSeasonDisplay(WorldTimeManager.Season season)
         {
             if (seasonText != null)
             {
@@ -130,7 +132,7 @@ namespace SkyRingTerrarium.UI
             }
         }
 
-        private void UpdateWeatherDisplay(WeatherType weather)
+        private void UpdateWeatherDisplay(WeatherSystem.WeatherState weather)
         {
             if (weatherIcon != null)
             {
@@ -173,40 +175,40 @@ namespace SkyRingTerrarium.UI
             return amount.ToString();
         }
 
-        private string GetSeasonName(Season season)
+        private string GetSeasonName(WorldTimeManager.Season season)
         {
             return season switch
             {
-                Season.Spring => "Spring",
-                Season.Summer => "Summer",
-                Season.Autumn => "Autumn",
-                Season.Winter => "Winter",
+                WorldTimeManager.Season.Spring => "Spring",
+                WorldTimeManager.Season.Summer => "Summer",
+                WorldTimeManager.Season.Autumn => "Autumn",
+                WorldTimeManager.Season.Winter => "Winter",
                 _ => "Unknown"
             };
         }
 
-        private string GetWeatherName(WeatherType weather)
+        private string GetWeatherName(WeatherSystem.WeatherState weather)
         {
             return weather switch
             {
-                WeatherType.Clear => "Clear",
-                WeatherType.Windy => "Windy",
-                WeatherType.Stormy => "Storm",
-                WeatherType.MoteShower => "Mote Shower",
-                WeatherType.AuroraWind => "Aurora",
+                WeatherSystem.WeatherState.Clear => "Clear",
+                WeatherSystem.WeatherState.Windy => "Windy",
+                WeatherSystem.WeatherState.Stormy => "Storm",
+                WeatherSystem.WeatherState.Calm => "Mote Shower",
+                WeatherSystem.WeatherState.Misty => "Aurora",
                 _ => "Unknown"
             };
         }
 
-        private Sprite GetWeatherIcon(WeatherType weather)
+        private Sprite GetWeatherIcon(WeatherSystem.WeatherState weather)
         {
             return weather switch
             {
-                WeatherType.Clear => clearWeatherIcon,
-                WeatherType.Windy => windyWeatherIcon,
-                WeatherType.Stormy => stormyWeatherIcon,
-                WeatherType.MoteShower => moteShowerIcon,
-                WeatherType.AuroraWind => auroraWindIcon,
+                WeatherSystem.WeatherState.Clear => clearWeatherIcon,
+                WeatherSystem.WeatherState.Windy => windyWeatherIcon,
+                WeatherSystem.WeatherState.Stormy => stormyWeatherIcon,
+                WeatherSystem.WeatherState.Calm => moteShowerIcon,
+                WeatherSystem.WeatherState.Misty => auroraWindIcon,
                 _ => clearWeatherIcon
             };
         }
