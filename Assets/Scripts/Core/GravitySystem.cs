@@ -70,121 +70,95 @@ namespace SkyRingTerrarium.Core
         }
 
         /// <summary>
-        /// Get the distance from a position to the ring surface
+        /// Calculates the gravity vector for a given world position.
+        /// Returns the direction and magnitude of gravity at that point.
         /// </summary>
-        public float GetDistanceFromRingSurface(Vector3 position)
+        public Vector3 CalculateGravity(Vector3 worldPosition)
         {
-            Vector3 toCenter = position - ringCenter;
+            Vector3 direction = GetGravityDirection(worldPosition);
+            float distance = GetDistanceFromRingSurface(worldPosition);
+            float normalizedDistance = Mathf.Clamp01(distance / maxGravityDistance);
+            float falloff = gravityFalloff.Evaluate(normalizedDistance);
             
-            // Project onto the ring plane (perpendicular to ring axis)
-            Vector3 onPlane = toCenter - Vector3.Project(toCenter, ringAxis);
-            float distanceFromAxis = onPlane.magnitude;
-            
-            // Distance from ring surface (positive = outside, negative = inside)
-            return distanceFromAxis - ringRadius;
+            return direction * gravityStrength * falloff;
         }
 
         /// <summary>
-        /// Calculate the gravity direction for a given position
+        /// Gets the gravity direction at a given world position.
+        /// For a ring structure, gravity points toward the nearest point on the ring surface.
         /// </summary>
-        public Vector3 CalculateGravityDirection(Vector3 position)
+        public Vector3 GetGravityDirection(Vector3 worldPosition)
         {
-            Vector3 toCenter = position - ringCenter;
+            Vector3 toCenter = ringCenter - worldPosition;
+            Vector3 projectedOnAxis = Vector3.Project(toCenter, ringAxis);
+            Vector3 radialFromAxis = toCenter - projectedOnAxis;
             
-            // Project onto the ring plane
-            Vector3 onPlane = toCenter - Vector3.Project(toCenter, ringAxis);
-            
-            if (onPlane.magnitude < 0.001f)
+            if (radialFromAxis.sqrMagnitude < 0.001f)
             {
-                // Object is on the axis, use arbitrary direction
                 return -ringAxis;
             }
             
-            // For ring structure, gravity points toward the ring surface
-            // (radially inward toward the ring torus)
-            float distanceFromAxis = onPlane.magnitude;
+            Vector3 nearestPointOnRing = ringCenter - radialFromAxis.normalized * ringRadius;
+            Vector3 gravityDirection = (nearestPointOnRing - worldPosition).normalized;
             
-            if (distanceFromAxis > ringRadius)
-            {
-                // Outside ring - gravity points toward ring center
-                return -onPlane.normalized;
-            }
-            else
-            {
-                // Inside ring - gravity points outward to ring surface
-                return onPlane.normalized;
-            }
+            return gravityDirection;
         }
 
         /// <summary>
-        /// Calculate the full gravity vector (direction and magnitude) for a given position
+        /// Gets the distance from the ring surface.
         /// </summary>
-        public Vector3 CalculateGravity(Vector3 position)
+        public float GetDistanceFromRingSurface(Vector3 worldPosition)
         {
-            float distanceFromSurface = Mathf.Abs(GetDistanceFromRingSurface(position));
+            Vector3 toCenter = ringCenter - worldPosition;
+            Vector3 projectedOnAxis = Vector3.Project(toCenter, ringAxis);
+            Vector3 radialFromAxis = toCenter - projectedOnAxis;
             
-            if (distanceFromSurface > maxGravityDistance)
-            {
-                return Vector3.zero;
-            }
-
-            float normalizedDistance = distanceFromSurface / maxGravityDistance;
-            float gravityMultiplier = gravityFalloff.Evaluate(normalizedDistance);
+            float distanceFromAxis = radialFromAxis.magnitude;
+            float heightAboveRingPlane = projectedOnAxis.magnitude;
             
-            Vector3 direction = CalculateGravityDirection(position);
-            return direction * gravityStrength * gravityMultiplier;
+            float radialDistance = Mathf.Abs(distanceFromAxis - ringRadius);
+            
+            return Mathf.Sqrt(radialDistance * radialDistance + heightAboveRingPlane * heightAboveRingPlane);
         }
 
         /// <summary>
-        /// Get the "up" direction for a given position (opposite of gravity)
+        /// Gets the altitude above the ring surface.
         /// </summary>
-        public Vector3 GetUpDirection(Vector3 position)
+        public float GetAltitude(Vector3 worldPosition)
         {
-            return -CalculateGravityDirection(position);
+            return GetDistanceFromRingSurface(worldPosition);
         }
 
         /// <summary>
-        /// Find the nearest point on the ring surface
+        /// Checks if a position is within the gravity influence zone.
         /// </summary>
-        public Vector3 GetNearestPointOnRing(Vector3 position)
+        public bool IsInGravityZone(Vector3 worldPosition)
         {
-            Vector3 toCenter = position - ringCenter;
-            Vector3 onPlane = toCenter - Vector3.Project(toCenter, ringAxis);
-            
-            if (onPlane.magnitude < 0.001f)
-            {
-                onPlane = Vector3.right;
-            }
-            
-            return ringCenter + onPlane.normalized * ringRadius;
+            return GetDistanceFromRingSurface(worldPosition) <= maxGravityDistance;
         }
 
         /// <summary>
-        /// Get the angular position around the ring (0-360 degrees)
+        /// Gets the orbital velocity required for a stable orbit at the given altitude.
         /// </summary>
-        public float GetAngularPosition(Vector3 position)
+        public float GetOrbitalVelocity(float altitude)
         {
-            Vector3 toCenter = position - ringCenter;
-            Vector3 onPlane = toCenter - Vector3.Project(toCenter, ringAxis);
-            
-            float angle = Mathf.Atan2(onPlane.z, onPlane.x) * Mathf.Rad2Deg;
-            if (angle < 0) angle += 360f;
-            
-            return angle;
+            float effectiveRadius = ringRadius + altitude;
+            return Mathf.Sqrt(gravityStrength * effectiveRadius);
         }
 
         private void OnDrawGizmos()
         {
             if (!showDebugGizmos) return;
 
-            // Draw ring
-            Gizmos.color = Color.green;
+            Gizmos.color = Color.yellow;
             DrawRingGizmo(ringRadius, 64);
+            
+            Gizmos.color = new Color(1f, 1f, 0f, 0.3f);
+            DrawRingGizmo(ringRadius - 5f, 64);
+            DrawRingGizmo(ringRadius + 5f, 64);
 
-            // Draw gravity influence boundary
-            Gizmos.color = new Color(0.5f, 0.5f, 1f, 0.3f);
-            DrawRingGizmo(ringRadius + maxGravityDistance, 32);
-            DrawRingGizmo(Mathf.Max(0, ringRadius - maxGravityDistance), 32);
+            Gizmos.color = new Color(1f, 0.5f, 0f, 0.2f);
+            DrawRingGizmo(ringRadius + maxGravityDistance, 64);
         }
 
         private void DrawRingGizmo(float radius, int segments)
@@ -194,8 +168,16 @@ namespace SkyRingTerrarium.Core
                 float angle1 = (i / (float)segments) * Mathf.PI * 2f;
                 float angle2 = ((i + 1) / (float)segments) * Mathf.PI * 2f;
 
-                Vector3 p1 = ringCenter + new Vector3(Mathf.Cos(angle1) * radius, 0f, Mathf.Sin(angle1) * radius);
-                Vector3 p2 = ringCenter + new Vector3(Mathf.Cos(angle2) * radius, 0f, Mathf.Sin(angle2) * radius);
+                Vector3 localRight = Vector3.Cross(ringAxis, Vector3.forward);
+                if (localRight.sqrMagnitude < 0.001f)
+                {
+                    localRight = Vector3.Cross(ringAxis, Vector3.right);
+                }
+                localRight.Normalize();
+                Vector3 localForward = Vector3.Cross(localRight, ringAxis);
+
+                Vector3 p1 = ringCenter + (localRight * Mathf.Cos(angle1) + localForward * Mathf.Sin(angle1)) * radius;
+                Vector3 p2 = ringCenter + (localRight * Mathf.Cos(angle2) + localForward * Mathf.Sin(angle2)) * radius;
 
                 Gizmos.DrawLine(p1, p2);
             }
