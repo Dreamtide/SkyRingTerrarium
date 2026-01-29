@@ -1,5 +1,5 @@
 using UnityEngine;
-using SkyRingTerrarium.Core;
+// PlayerController is in the SkyRingTerrarium namespace (no sub-namespace needed)
 
 namespace SkyRingTerrarium
 {
