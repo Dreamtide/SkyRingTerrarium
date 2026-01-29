@@ -1,9 +1,10 @@
 {
-    "name": "SkyRingTerrarium",
+    "name": "SkyRingTerrarium.Legacy",
     "rootNamespace": "SkyRingTerrarium",
     "references": [
         "Unity.TextMeshPro",
-        "Unity.InputSystem"
+        "Unity.InputSystem",
+        "SkyRingTerrarium"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
