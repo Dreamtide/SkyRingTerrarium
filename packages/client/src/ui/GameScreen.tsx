@@ -6,6 +6,7 @@ import HUD from "./HUD";
 import TouchControls from "./TouchControls";
 import ResultOverlay from "./ResultOverlay";
 import ScreenEffects from "./ScreenEffects";
+import Crosshair from "./Crosshair";
 import { inputManager } from "../input/InputManager";
 import { audioEngine } from "../audio/audio";
 
@@ -38,6 +39,7 @@ export default function GameScreen() {
       <ScreenEffects />
       <HUD />
       {isMobile && !showResult && <TouchControls />}
+      {!isMobile && !showResult && <Crosshair />}
       {showResult && <ResultOverlay />}
     </div>
   );

@@ -1,14 +1,32 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { useGameStore } from "../state/store";
 import { damp, lerpAngle } from "../util/math";
 import { fxBus } from "../net/fx";
+import { inputManager } from "../input/InputManager";
 
 const DIST = 9.5;
 const HEIGHT = 5.4;
 const LOOK_HEIGHT = 1.4;
 const BASE_FOV = 52;
+// Desktop uses a fixed ARPG-style orbit angle and a perfectly rigid rotation (position
+// translates to follow the player, but the camera never rotates) rather than orbiting to
+// stay behind the player's facing or using lookAt() toward a separately-damped target.
+// This matters beyond taste: DesktopAimController raycasts the mouse through this same
+// camera to compute aim yaw, and aim yaw drives player facing. Any rotation of the camera
+// - even subtle wobble from a lookAt() target that lags position by a different damping
+// rate during fast movement - changes the ray direction, which changes aim, which changes
+// movement direction, which changes the camera's target again: a feedback loop that shows
+// up as aim/movement direction silently drifting during sustained input. A perfectly rigid
+// (translate-only) camera has no rotation to wobble, so the loop can't exist.
+const DESKTOP_ORBIT_YAW = Math.PI * 0.15;
+// Direction from the camera to its look-at point: horizontally back toward the player
+// (opposite of the camera's offset-from-player vector), and down by the camera/look
+// height difference - i.e. exactly the geometry of "camera sits behind and above the
+// player, tilted down to look at them", but expressed as a fixed vector instead of a
+// per-frame lookAt(player) so it never depends on the player's exact position.
+const DESKTOP_LOOK_DIR = new THREE.Vector3(Math.sin(DESKTOP_ORBIT_YAW) * DIST, LOOK_HEIGHT - HEIGHT, Math.cos(DESKTOP_ORBIT_YAW) * DIST).normalize();
 
 export default function CameraRig() {
   const { camera } = useThree();
@@ -19,6 +37,7 @@ export default function CameraRig() {
   const desired = useRef(new THREE.Vector3());
   const shake = useRef(0);
   const fovPunch = useRef(0);
+  const desktop = useMemo(() => !inputManager.isMobileLike(), []);
 
   useEffect(() => {
     const offs = ["hit", "ram", "downed"].map((t) =>
@@ -43,7 +62,7 @@ export default function CameraRig() {
     const pz = me?.z ?? 0;
     const pyaw = me?.yaw ?? 0;
 
-    smoothedYaw.current = lerpAngle(smoothedYaw.current, pyaw, 4, dt);
+    smoothedYaw.current = desktop ? DESKTOP_ORBIT_YAW : lerpAngle(smoothedYaw.current, pyaw, 4, dt);
 
     const back = new THREE.Vector3(Math.sin(smoothedYaw.current), 0, Math.cos(smoothedYaw.current)).multiplyScalar(-DIST);
     desired.current.set(px + back.x, HEIGHT, pz + back.z);
@@ -58,11 +77,17 @@ export default function CameraRig() {
     camera.position.y = damp(camera.position.y, desired.current.y, 6, dt);
     camera.position.z = damp(camera.position.z, desired.current.z, 6, dt);
 
-    target.current.set(
-      damp(target.current.x, px, 8, dt),
-      damp(target.current.y, LOOK_HEIGHT, 8, dt),
-      damp(target.current.z, pz, 8, dt)
-    );
+    if (desktop) {
+      // Rigid look direction: always "camera position + a constant offset", so rotation
+      // never varies with the player's exact position - see DESKTOP_ORBIT_YAW comment.
+      target.current.copy(camera.position).add(DESKTOP_LOOK_DIR);
+    } else {
+      target.current.set(
+        damp(target.current.x, px, 8, dt),
+        damp(target.current.y, LOOK_HEIGHT, 8, dt),
+        damp(target.current.z, pz, 8, dt)
+      );
+    }
     camera.lookAt(target.current);
 
     if (fovPunch.current > 0) fovPunch.current = Math.max(0, fovPunch.current - dt * 2.4);
