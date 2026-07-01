@@ -4,6 +4,8 @@ import { useGameStore } from "../state/store";
 import { audioEngine } from "../audio/audio";
 import { inputManager } from "../input/InputManager";
 import { useNarrowViewport } from "./useNarrowViewport";
+import SettingsButton from "./SettingsPanel";
+import KillFeed from "./KillFeed";
 
 const TASK_LABEL: Record<string, string> = {
   guard: "Guard",
@@ -171,7 +173,15 @@ function ShardCounter({ narrow }: { narrow: boolean }) {
   return (
     <div
       className="dream-panel"
-      style={{ position: "absolute", top: 14, right: 14, padding: narrow ? "5px 9px" : "8px 14px", fontWeight: 700, fontSize: narrow ? 11 : 14, color: "var(--warn)" }}
+      style={{
+        position: "absolute",
+        top: 14,
+        right: 62,
+        padding: narrow ? "5px 9px" : "8px 14px",
+        fontWeight: 700,
+        fontSize: narrow ? 11 : 14,
+        color: "var(--warn)",
+      }}
     >
       ◆ {shards}
     </div>
@@ -200,7 +210,9 @@ export default function HUD() {
       <PhaseBanner narrow={narrow} />
       <SquadPanel narrow={narrow} />
       <ShardCounter narrow={narrow} />
+      <KillFeed />
       <div style={{ pointerEvents: "auto" }}>
+        <SettingsButton />
         <DogPanel bottomOffset={dogPanelBottom} />
       </div>
     </div>

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useGameStore } from "../state/store";
 import { audioEngine } from "../audio/audio";
 
@@ -9,6 +10,12 @@ export default function ResultOverlay() {
   const setScreen = useGameStore((s) => s.setScreen);
 
   const win = hud.phase === "victory";
+
+  useEffect(() => {
+    if (win) audioEngine.victory();
+    else audioEngine.defeat();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function returnToLobby() {
     audioEngine.click();
@@ -28,7 +35,7 @@ export default function ResultOverlay() {
         backdropFilter: "blur(4px)",
       }}
     >
-      <div className="dream-panel" style={{ padding: "36px 40px", textAlign: "center", minWidth: 320 }}>
+      <div className="dream-panel dream-fade-in" style={{ padding: "36px 40px", textAlign: "center", minWidth: 320 }}>
         <div className="dream-title" style={{ fontSize: 30, marginBottom: 8 }}>
           {win ? "Deployment Complete" : "Squad Down"}
         </div>

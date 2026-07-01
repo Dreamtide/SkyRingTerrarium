@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { PARTS_BY_ID, PLAYER_BASE } from "@dream/shared";
+import { MovementStats, PARTS_BY_ID, PLAYER_BASE, computeStats } from "@dream/shared";
 import { useGameStore } from "../state/store";
 import { fxBus } from "../net/fx";
 import { damp, hueToHex, lerpAngle } from "../util/math";
+import { LocalPredictor } from "../net/prediction";
+import { inputManager } from "../input/InputManager";
 import NamePlate from "./NamePlate";
 
 interface AnimState {
@@ -154,10 +156,21 @@ function VehicleForm({ color, anim, engineHue }: { color: string; anim: AnimStat
 export default function RobotPlayer({ sessionId, isLocal }: { sessionId: string; isLocal: boolean }) {
   const room = useGameStore((s) => s.room);
   const player = useGameStore((s) => s.players[sessionId]);
+  const obstacles = useGameStore((s) => s.obstacles);
   const groupRef = useRef<THREE.Group>(null!);
   const lastPos = useRef(new THREE.Vector3());
   const anim = useRef<AnimState>({ speed: 0, walk: 0, transformT: 0, overdrive: 0, dashT: 0 }).current;
   const spinBoost = useRef(0);
+  const predictorRef = useRef<LocalPredictor | null>(null);
+  const [displayMode, setDisplayMode] = useState(player?.mode ?? "robot");
+
+  useEffect(() => {
+    if (isLocal && !predictorRef.current) predictorRef.current = new LocalPredictor();
+  }, [isLocal]);
+
+  useEffect(() => {
+    if (!isLocal && player) setDisplayMode(player.mode);
+  }, [isLocal, player?.mode]);
 
   useEffect(() => {
     const off = fxBus.on("transformStart", (d) => {
@@ -167,12 +180,36 @@ export default function RobotPlayer({ sessionId, isLocal }: { sessionId: string;
   }, [sessionId]);
 
   useFrame((_, dt) => {
-    const state = room?.state as unknown as { players: Map<string, { x: number; z: number; yaw: number }> } | undefined;
+    const state = room?.state as
+      | { players: Map<string, { x: number; z: number; yaw: number; mode: string; transforming: boolean }> }
+      | undefined;
     const p = state?.players?.get(sessionId);
-    if (!p || !groupRef.current) return;
-    const lerpRate = isLocal ? 16 : 10;
-    groupRef.current.position.x = damp(groupRef.current.position.x, p.x, lerpRate, dt);
-    groupRef.current.position.z = damp(groupRef.current.position.z, p.z, lerpRate, dt);
+    if (!p || !groupRef.current || !player) return;
+
+    let targetX = p.x;
+    let targetZ = p.z;
+    let targetYaw = p.yaw;
+
+    if (isLocal && predictorRef.current) {
+      const predictor = predictorRef.current;
+      const stats: MovementStats = computeStats(player.loadout);
+      const input = inputManager.sample();
+      const events = predictor.step(input, stats, obstacles, dt);
+      if (events.dashStart) fxBus.emit("dash", { sessionId, x: predictor.state.x, z: predictor.state.z, yaw: predictor.state.yaw });
+      if (events.transformStart) fxBus.emit("transformStart", { sessionId, x: predictor.state.x, z: predictor.state.z });
+      if (events.transformEnd) {
+        fxBus.emit("transform", { sessionId, mode: predictor.state.mode });
+        setDisplayMode(predictor.state.mode);
+      }
+      predictor.reconcile(p.x, p.z, p.yaw, p.mode, p.transforming);
+      targetX = predictor.state.x;
+      targetZ = predictor.state.z;
+      targetYaw = predictor.state.yaw;
+    }
+
+    const lerpRate = isLocal ? 26 : 10;
+    groupRef.current.position.x = damp(groupRef.current.position.x, targetX, lerpRate, dt);
+    groupRef.current.position.z = damp(groupRef.current.position.z, targetZ, lerpRate, dt);
 
     const dx = groupRef.current.position.x - lastPos.current.x;
     const dz = groupRef.current.position.z - lastPos.current.z;
@@ -186,7 +223,7 @@ export default function RobotPlayer({ sessionId, isLocal }: { sessionId: string;
       const s = 1 - Math.sin(spinBoost.current * Math.PI) * 0.85;
       groupRef.current.scale.setScalar(THREE.MathUtils.clamp(s, 0.18, 1));
     } else {
-      groupRef.current.rotation.y = lerpAngle(groupRef.current.rotation.y, p.yaw, 12, dt);
+      groupRef.current.rotation.y = lerpAngle(groupRef.current.rotation.y, targetYaw, isLocal ? 18 : 12, dt);
       groupRef.current.scale.setScalar(damp(groupRef.current.scale.x, 1, 12, dt));
     }
     anim.walk += dt;
@@ -201,7 +238,7 @@ export default function RobotPlayer({ sessionId, isLocal }: { sessionId: string;
   return (
     <group ref={groupRef}>
       <group rotation={[player.downed ? Math.PI / 2 : 0, 0, 0]} position={[0, player.downed ? 0.3 : 0, 0]}>
-        {player.mode === "vehicle" ? (
+        {displayMode === "vehicle" ? (
           <VehicleForm color={player.color} anim={anim} engineHue={engineHue} />
         ) : (
           <RobotForm color={player.color} anim={anim} weaponHue={weaponHue} platingHue={platingHue} />

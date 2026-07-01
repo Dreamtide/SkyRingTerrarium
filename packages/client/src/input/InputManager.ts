@@ -1,21 +1,29 @@
 import type { InputState } from "@dream/shared";
 
+const TOUCH_PULSE_MS = 140;
+
 /**
  * Unifies keyboard, virtual touch joystick/buttons, and gamepad input into a single
- * per-frame InputState. Movement is single-stick: facing (yaw) always tracks the
- * movement heading, and combat auto-targets the nearest enemy in a forward cone
- * server-side, so the same simple control scheme works well on touch, keyboard and pad.
+ * InputState. Movement is single-stick: facing (yaw) always tracks the movement
+ * heading, and combat auto-targets the nearest enemy in a forward cone server-side,
+ * so the same simple control scheme works well on touch, keyboard and pad.
+ *
+ * sample() is a pure read of "what does input look like right now" - it has no
+ * side effects, so it's safe to call once per render frame (for local prediction)
+ * AND again on the network-send timer without the two colliding. Edge-triggered
+ * actions (transform/dash "pressed this tick") are detected independently by
+ * each consumer (see stepPlayerMovement's prevTransformBtn/prevDashBtn), not here.
  */
 class InputManager {
   private keys = new Set<string>();
   private touchMoveX = 0;
   private touchMoveZ = 0;
   private touchAttack = false;
-  private touchTransformPulse = 0;
-  private touchDashPulse = 0;
+  private touchTransformUntil = 0;
+  private touchDashUntil = 0;
 
   private lastYaw = 0;
-  private seq = 0;
+  private sendSeq = 0;
   private started = false;
 
   start() {
@@ -66,15 +74,20 @@ class InputManager {
   }
 
   pulseTouchTransform() {
-    this.touchTransformPulse = 2; // held true for 2 sampled frames to guarantee edge detection
+    this.touchTransformUntil = performance.now() + TOUCH_PULSE_MS;
   }
 
   pulseTouchDash() {
-    this.touchDashPulse = 2;
+    this.touchDashUntil = performance.now() + TOUCH_PULSE_MS;
   }
 
   isMobileLike(): boolean {
     return "ontouchstart" in window || navigator.maxTouchPoints > 0;
+  }
+
+  /** Monotonic sequence number for outgoing network input messages only. */
+  nextSeq(): number {
+    return this.sendSeq++;
   }
 
   sample(): InputState {
@@ -96,12 +109,10 @@ class InputManager {
       this.lastYaw = Math.atan2(mx, mz);
     }
 
+    const now = performance.now();
     const attack = this.touchAttack || this.keys.has("Space") || this.keys.has("KeyJ") || this.keys.has("Mouse0");
-    const transform = this.touchTransformPulse > 0 || this.keys.has("KeyF") || this.keys.has("KeyE");
-    const dash = this.touchDashPulse > 0 || this.keys.has("ShiftLeft") || this.keys.has("ShiftRight") || this.keys.has("KeyK");
-
-    if (this.touchTransformPulse > 0) this.touchTransformPulse--;
-    if (this.touchDashPulse > 0) this.touchDashPulse--;
+    const transform = now < this.touchTransformUntil || this.keys.has("KeyF") || this.keys.has("KeyE");
+    const dash = now < this.touchDashUntil || this.keys.has("ShiftLeft") || this.keys.has("ShiftRight") || this.keys.has("KeyK");
 
     return {
       moveX: mx,
@@ -110,7 +121,7 @@ class InputManager {
       attack,
       transform,
       dash,
-      seq: this.seq++,
+      seq: 0,
     };
   }
 }

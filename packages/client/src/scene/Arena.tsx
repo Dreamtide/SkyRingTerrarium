@@ -1,7 +1,7 @@
 import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { ARENA_RADIUS, generateArenaLayout } from "@dream/shared";
+import { ARENA_RADIUS } from "@dream/shared";
 import { useGameStore } from "../state/store";
 
 function Obstacle({ x, z, radius, height, kind }: { x: number; z: number; radius: number; height: number; kind: string }) {
@@ -59,19 +59,33 @@ function Ground() {
           varying vec2 vPos;
           uniform float uTime;
           uniform float uRadius;
+
+          float hash(vec2 p) {
+            return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+          }
+
           void main() {
             float d = length(vPos);
-            vec3 base = mix(vec3(0.03,0.05,0.09), vec3(0.05,0.08,0.14), smoothstep(0.0, uRadius, d));
-            float grid = 0.0;
-            vec2 g = abs(fract(vPos * 0.1) - 0.5);
-            float line = min(g.x, g.y);
-            grid = smoothstep(0.045, 0.0, line) * 0.18;
+            float n = (hash(floor(vPos * 0.6)) - 0.5) * 0.025;
+            vec3 base = mix(vec3(0.025,0.04,0.08), vec3(0.05,0.08,0.15), smoothstep(0.0, uRadius, d)) + n;
+
+            vec2 g1 = abs(fract(vPos * 0.1) - 0.5);
+            float grid1 = smoothstep(0.045, 0.0, min(g1.x, g1.y)) * 0.15;
+            vec2 g2 = abs(fract(vPos * 0.02) - 0.5);
+            float grid2 = smoothstep(0.012, 0.0, min(g2.x, g2.y)) * 0.26;
+
             float edge = smoothstep(uRadius, uRadius - 3.0, d);
+            vec3 col = base + (grid1 + grid2) * vec3(0.3,0.55,1.0) * edge;
+
+            float pulse = fract(uTime * 0.1);
+            float ringWave = smoothstep(0.025, 0.0, abs(d - pulse * uRadius * 1.25)) * (1.0 - pulse) * edge;
+            col += ringWave * vec3(0.35, 0.62, 1.0) * 0.55;
+
             float ring = smoothstep(uRadius+0.4, uRadius, d) - smoothstep(uRadius, uRadius-0.4, d);
-            vec3 col = base + grid * vec3(0.3,0.55,1.0) * edge;
             col += vec3(0.4,0.7,1.0) * clamp(ring,0.0,1.0) * (0.6 + 0.4*sin(uTime*2.0));
+
             float vign = smoothstep(uRadius+6.0, uRadius*0.3, d);
-            col *= mix(0.35, 1.0, vign);
+            col *= mix(0.32, 1.0, vign);
             gl_FragColor = vec4(col, 1.0);
           }
         `}
@@ -81,8 +95,7 @@ function Ground() {
 }
 
 export default function Arena() {
-  const seed = useGameStore((s) => s.hud.seed || 1);
-  const obstacles = useMemo(() => generateArenaLayout(seed), [seed]);
+  const obstacles = useGameStore((s) => s.obstacles);
 
   return (
     <group>

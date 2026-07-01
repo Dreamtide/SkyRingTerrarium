@@ -58,7 +58,7 @@ function refreshEvolution(dog: DogSchema, onFx: DogTickCtx["onFx"], ownerSession
   if (form.id !== dog.formId) {
     dog.formId = form.id;
     dog.stage = form.stage;
-    onFx("evolve", { ownerSessionId, formId: form.id, formName: form.name, stage: form.stage });
+    onFx("evolve", { ownerSessionId, formId: form.id, formName: form.name, stage: form.stage, x: dog.x, z: dog.z });
   }
 }
 
@@ -97,6 +97,7 @@ export function tickDog(ctx: DogTickCtx) {
           const killed = damageEnemy(n.e, dmg);
           addAffinity(dog, DogTask.Hunt, DOG_TASK_XP.huntKillAssist * 0.5);
           ctx.onFx("bite", { x: n.e.x, z: n.e.z, ownerSessionId: dog.ownerSessionId });
+          ctx.onFx("damage", { target: "enemy", enemyId: n.id, x: n.e.x, y: 0.8, z: n.e.z, amount: Math.round(dmg) });
           if (killed) {
             owner.kills += 1;
             addAffinity(dog, DogTask.Hunt, DOG_TASK_XP.huntKillAssist);

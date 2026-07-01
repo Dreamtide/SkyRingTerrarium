@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Room } from "colyseus.js";
+import { ArenaObstacle, generateArenaLayout } from "@dream/shared";
 import { DogSnapshot, HudState, PlayerSnapshot } from "../net/types";
 
 export type Screen = "menu" | "lobby" | "game";
@@ -18,6 +19,9 @@ interface GameStore {
   players: Record<string, PlayerSnapshot>;
   dogs: Record<string, DogSnapshot>;
   hud: HudState;
+  /** Derived from hud.seed - kept in sync so client-side movement prediction and
+   *  rendering (Arena) always agree on the exact same obstacle layout as the server. */
+  obstacles: ArenaObstacle[];
 
   setScreen: (s: Screen) => void;
   setRoom: (r: Room | null) => void;
@@ -69,6 +73,7 @@ export const useGameStore = create<GameStore>((set) => ({
   players: {},
   dogs: {},
   hud: defaultHud,
+  obstacles: [],
 
   setScreen: (s) => set({ screen: s }),
   setRoom: (r) => set({ room: r }),
@@ -97,7 +102,12 @@ export const useGameStore = create<GameStore>((set) => ({
       delete dogs[id];
       return { dogs };
     }),
-  setHud: (h) => set((s) => ({ hud: { ...s.hud, ...h } })),
+  setHud: (h) =>
+    set((s) => {
+      const nextSeed = h.seed ?? s.hud.seed;
+      const obstacles = nextSeed !== s.hud.seed || s.obstacles.length === 0 ? generateArenaLayout(nextSeed || 1) : s.obstacles;
+      return { hud: { ...s.hud, ...h }, obstacles };
+    }),
   reset: () =>
     set({
       playerIds: [],
@@ -106,5 +116,6 @@ export const useGameStore = create<GameStore>((set) => ({
       players: {},
       dogs: {},
       hud: defaultHud,
+      obstacles: [],
     }),
 }));

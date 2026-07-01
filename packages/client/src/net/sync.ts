@@ -103,7 +103,11 @@ export function attachRoomSync(room: Room) {
   $(state).onChange(() => syncHud());
   syncHud();
 
-  room.onMessage("fx", (data: Record<string, unknown> & { type: string }) => {
+  room.onMessage("fx", (data: Record<string, unknown> & { type: string; sessionId?: string }) => {
+    // "dash" and "transformStart" are predicted instantly client-side for the local
+    // player (see net/prediction.ts + RobotPlayer) - drop the server's later echo of
+    // our own action so we don't double-trigger the sound/animation for ourselves.
+    if ((data.type === "dash" || data.type === "transformStart") && data.sessionId === room.sessionId) return;
     fxBus.emit(data.type, data);
   });
 

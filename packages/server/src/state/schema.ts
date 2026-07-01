@@ -17,6 +17,7 @@ export class PlayerSchema extends Schema {
   @type("number") yaw: number = 0;
   @type("string") mode: string = "robot";
   @type("boolean") transforming: boolean = false;
+  @type("number") ackSeq: number = 0;
   @type("number") health: number = 100;
   @type("number") maxHealth: number = 100;
   @type("number") shield: number = 40;

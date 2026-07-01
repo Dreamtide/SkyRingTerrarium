@@ -80,3 +80,49 @@
 
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 8px; }
+
+@keyframes dream-damage-flash-kf {
+  0% { opacity: 0; }
+  8% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.dream-damage-flash {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 38%, rgba(255, 40, 40, 0.55) 100%);
+  animation: dream-damage-flash-kf 0.5s ease-out forwards;
+}
+
+@keyframes dream-low-health-kf {
+  0%, 100% { opacity: 0.32; }
+  50% { opacity: 0.68; }
+}
+.dream-low-health {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 32%, rgba(200, 10, 10, 0.5) 100%);
+  animation: dream-low-health-kf 1.15s ease-in-out infinite;
+}
+
+.dream-downed-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 5, 5, 0.45);
+  backdrop-filter: grayscale(0.7) brightness(0.75);
+}
+
+@keyframes dream-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.dream-fade-in {
+  animation: dream-fade-in 0.35s ease-out both;
+}
+
+@keyframes dream-toast-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.dream-toast {
+  animation: dream-toast-in 0.25s ease-out both;
+}

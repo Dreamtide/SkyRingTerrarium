@@ -8,6 +8,7 @@ import { fxBus } from "../net/fx";
 const DIST = 9.5;
 const HEIGHT = 5.4;
 const LOOK_HEIGHT = 1.4;
+const BASE_FOV = 52;
 
 export default function CameraRig() {
   const { camera } = useThree();
@@ -17,6 +18,7 @@ export default function CameraRig() {
   const target = useRef(new THREE.Vector3());
   const desired = useRef(new THREE.Vector3());
   const shake = useRef(0);
+  const fovPunch = useRef(0);
 
   useEffect(() => {
     const offs = ["hit", "ram", "downed"].map((t) =>
@@ -24,7 +26,13 @@ export default function CameraRig() {
         if (!data.sessionId || data.sessionId === mySessionId) shake.current = Math.min(0.5, shake.current + 0.18);
       })
     );
-    return () => offs.forEach((o) => o());
+    const offTransform = fxBus.on("transformStart", (data) => {
+      if (data.sessionId === mySessionId) fovPunch.current = 1;
+    });
+    return () => {
+      offs.forEach((o) => o());
+      offTransform();
+    };
   }, [mySessionId]);
 
   useFrame((_, dt) => {
@@ -56,6 +64,14 @@ export default function CameraRig() {
       damp(target.current.z, pz, 8, dt)
     );
     camera.lookAt(target.current);
+
+    if (fovPunch.current > 0) fovPunch.current = Math.max(0, fovPunch.current - dt * 2.4);
+    const cam = camera as THREE.PerspectiveCamera;
+    if (typeof cam.fov === "number") {
+      const targetFov = BASE_FOV + fovPunch.current * 9;
+      cam.fov = damp(cam.fov, targetFov, 9, dt);
+      cam.updateProjectionMatrix();
+    }
   });
 
   return null;

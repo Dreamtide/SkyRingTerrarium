@@ -1,11 +1,13 @@
 import { Canvas } from "@react-three/fiber";
-import { EffectComposer, Bloom, Vignette, SMAA } from "@react-three/postprocessing";
+import { EffectComposer, Bloom, Vignette, SMAA, BrightnessContrast, HueSaturation } from "@react-three/postprocessing";
 import { useGameStore } from "../state/store";
 import Lighting from "./Lighting";
 import Arena from "./Arena";
+import Sky from "./Sky";
 import CameraRig from "./CameraRig";
 import { Players, Dogs, Enemies, Pickups } from "./EntityGroups";
 import FxLayer from "../entities/FxLayer";
+import DamageNumbers from "../entities/DamageNumbers";
 
 export default function GameCanvas() {
   const quality = useGameStore((s) => s.quality);
@@ -19,7 +21,7 @@ export default function GameCanvas() {
       camera={{ fov: 52, near: 0.1, far: 220, position: [0, 6, 10] }}
       style={{ position: "absolute", inset: 0 }}
     >
-      <color attach="background" args={["#05070d"]} />
+      <Sky />
       <Lighting />
       <Arena />
       <Players />
@@ -27,11 +29,14 @@ export default function GameCanvas() {
       <Enemies />
       <Pickups />
       <FxLayer />
+      <DamageNumbers />
       <CameraRig />
       {quality !== "low" && (
         <EffectComposer multisampling={0}>
-          <Bloom intensity={0.55} luminanceThreshold={0.35} luminanceSmoothing={0.25} mipmapBlur />
-          <Vignette eskil={false} offset={0.18} darkness={0.75} />
+          <Bloom intensity={0.6} luminanceThreshold={0.32} luminanceSmoothing={0.25} mipmapBlur />
+          <HueSaturation saturation={0.08} />
+          <BrightnessContrast brightness={0.0} contrast={0.08} />
+          <Vignette eskil={false} offset={0.16} darkness={0.8} />
           <SMAA />
         </EffectComposer>
       )}

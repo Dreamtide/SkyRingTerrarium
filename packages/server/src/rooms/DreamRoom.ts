@@ -16,10 +16,11 @@ import {
   WaveSpawnEntry,
   buildWave,
   bossForDeployment,
-  clampToArena,
   generateArenaLayout,
   mulberry32,
   rollPart,
+  stepPlayerMovement,
+  MovementState,
 } from "@dream/shared";
 import { DogSchema, EnemySchema, PickupSchema, PlayerSchema, RoomState } from "../state/schema";
 import { DogRuntime, EnemyRuntime, PlayerRuntime, freshInput } from "../sim/types";
@@ -86,7 +87,9 @@ export class DreamRoom extends Room<RoomState> {
 
     this.onMessage("input", (client, msg: Partial<InputState>) => {
       const rt = this.playerRt.get(client.sessionId);
-      if (!rt || typeof msg?.moveX !== "number" || !isFinite(msg.moveX)) return;
+      const player = this.state.players.get(client.sessionId);
+      if (!rt || !player || typeof msg?.moveX !== "number" || !isFinite(msg.moveX)) return;
+      const seq = (msg.seq as number) | 0;
       rt.input = {
         moveX: clamp(msg.moveX, -1, 1),
         moveZ: isFinite(msg.moveZ as number) ? clamp(msg.moveZ as number, -1, 1) : 0,
@@ -94,8 +97,10 @@ export class DreamRoom extends Room<RoomState> {
         attack: !!msg.attack,
         transform: !!msg.transform,
         dash: !!msg.dash,
-        seq: (msg.seq as number) | 0,
+        seq,
       };
+      // Lets the client discard acknowledged inputs from its prediction replay buffer.
+      player.ackSeq = seq;
     });
 
     this.setSimulationInterval(() => this.update(), 1000 / TICK_RATE);
@@ -338,7 +343,7 @@ export class DreamRoom extends Room<RoomState> {
     this.state.pickups.set(id, pickup);
   }
 
-  private onEnemyDeath(id: string, enemy: EnemySchema, _killerSessionId: string) {
+  private onEnemyDeath(id: string, enemy: EnemySchema, killerSessionId: string) {
     this.state.enemiesRemaining = Math.max(0, this.state.enemiesRemaining - 1);
     this.state.coreShardsEarned += CORE_SHARD_REWARD.perKill;
     if (enemy.enemyType === "boss") {
@@ -347,7 +352,7 @@ export class DreamRoom extends Room<RoomState> {
       const dropChance = enemy.enemyType === "scrapling" ? 0.3 : 0.55;
       if (this.rng() < dropChance) this.spawnPickup(enemy.x, enemy.z);
     }
-    this.broadcast("fx", { type: "death", enemyType: enemy.enemyType, x: enemy.x, z: enemy.z });
+    this.broadcast("fx", { type: "death", enemyType: enemy.enemyType, x: enemy.x, z: enemy.z, killerSessionId });
   }
 
   private damagePlayer(targetId: string, amount: number) {
@@ -358,6 +363,7 @@ export class DreamRoom extends Room<RoomState> {
     const stats = computeStats(player.loadout);
     const mitigated = mitigate(amount, stats.armor);
     applyDamage(player, mitigated);
+    this.broadcast("fx", { type: "damage", target: "player", sessionId: targetId, x: player.x, y: 1.6, z: player.z, amount: Math.round(mitigated) });
     if (player.health <= 0) {
       player.health = 0;
       player.downed = true;
@@ -448,88 +454,25 @@ export class DreamRoom extends Room<RoomState> {
     if (!player.alive || player.downed) return;
     const input = rt.input;
 
-    if (rt.transformTimer > 0) {
-      rt.transformTimer -= TICK_DT;
-      if (rt.transformTimer <= 0) {
-        player.mode = player.mode === "robot" ? "vehicle" : "robot";
-        player.transforming = false;
-        this.broadcast("fx", { type: "transform", sessionId, mode: player.mode });
-      }
-      rt.prevTransformBtn = input.transform;
-      return;
-    }
+    const state: MovementState = { x: player.x, z: player.z, yaw: player.yaw, mode: player.mode, transforming: player.transforming };
+    const events = stepPlayerMovement(state, rt, input, stats, this.obstacles, TICK_DT);
+    player.x = state.x;
+    player.z = state.z;
+    player.yaw = state.yaw;
+    player.mode = state.mode;
+    player.transforming = state.transforming;
 
-    const transformPressed = input.transform && !rt.prevTransformBtn;
-    rt.prevTransformBtn = input.transform;
-    if (transformPressed) {
-      rt.transformTimer = PLAYER_BASE.transformLockSeconds;
-      player.transforming = true;
-      this.broadcast("fx", { type: "transformStart", sessionId });
-      return;
-    }
-
-    if (rt.dashCooldown > 0) rt.dashCooldown -= TICK_DT;
-    const dashPressed = input.dash && !rt.prevDashBtn;
-    rt.prevDashBtn = input.dash;
-
-    if (rt.dashTimer > 0) {
-      rt.dashTimer -= TICK_DT;
-      const speed = PLAYER_BASE.dashDistance / 0.22;
-      this.movePlayer(player, rt.dashDirX * speed * TICK_DT, rt.dashDirZ * speed * TICK_DT);
-    } else if (dashPressed && rt.dashCooldown <= 0) {
-      let dx = input.moveX;
-      let dz = input.moveZ;
-      const len = Math.hypot(dx, dz);
-      if (len < 0.1) {
-        dx = Math.sin(input.yaw);
-        dz = Math.cos(input.yaw);
-      } else {
-        dx /= len;
-        dz /= len;
-      }
-      rt.dashDirX = dx;
-      rt.dashDirZ = dz;
-      rt.dashTimer = 0.22;
-      rt.dashCooldown = stats.dashCooldown;
+    if (events.transformStart) this.broadcast("fx", { type: "transformStart", sessionId, x: player.x, z: player.z });
+    if (events.transformEnd) this.broadcast("fx", { type: "transform", sessionId, mode: player.mode });
+    if (events.dashStart) {
       rt.invulnTimer = 0.3;
-      this.broadcast("fx", { type: "dash", sessionId });
-    } else {
-      const speedBase = player.mode === "vehicle" ? stats.vehicleSpeed : stats.robotSpeed;
-      const speed = speedBase * (rt.overdriveTimer > 0 ? 1.5 : 1);
-      let dx = input.moveX;
-      let dz = input.moveZ;
-      const len = Math.hypot(dx, dz);
-      if (len > 1) {
-        dx /= len;
-        dz /= len;
-      }
-      this.movePlayer(player, dx * speed * TICK_DT, dz * speed * TICK_DT);
+      this.broadcast("fx", { type: "dash", sessionId, x: player.x, z: player.z, yaw: player.yaw });
     }
+    if (events.blocked) return;
 
-    player.yaw = input.yaw;
-    if (rt.overdriveTimer > 0) rt.overdriveTimer -= TICK_DT;
     if (rt.invulnTimer > 0) rt.invulnTimer -= TICK_DT;
-
     if (rt.attackCooldown > 0) rt.attackCooldown -= TICK_DT;
     if (input.attack && rt.attackCooldown <= 0) this.handlePlayerAttack(sessionId, player, rt, stats);
-  }
-
-  private movePlayer(player: PlayerSchema, dx: number, dz: number) {
-    let nx = player.x + dx;
-    let nz = player.z + dz;
-    for (const o of this.obstacles) {
-      const ddx = nx - o.x;
-      const ddz = nz - o.z;
-      const d = Math.hypot(ddx, ddz);
-      const minD = o.radius + 0.55;
-      if (d < minD && d > 0.0001) {
-        nx = o.x + (ddx / d) * minD;
-        nz = o.z + (ddz / d) * minD;
-      }
-    }
-    const clamped = clampToArena(nx, nz);
-    player.x = clamped.x;
-    player.z = clamped.z;
   }
 
   private handlePlayerAttack(sessionId: string, player: PlayerSchema, rt: PlayerRuntime, stats: ReturnType<typeof computeStats>) {
@@ -562,6 +505,7 @@ export class DreamRoom extends Room<RoomState> {
       const enemy = best as EnemySchema;
       const killed = damageEnemy(enemy, stats.damage);
       this.broadcast("fx", { type: "shot", from: { x: player.x, y: 1.1, z: player.z }, to: { x: enemy.x, y: 1, z: enemy.z }, sessionId });
+      this.broadcast("fx", { type: "damage", target: "enemy", enemyId: bestId, x: enemy.x, y: 1.3, z: enemy.z, amount: Math.round(stats.damage) });
       if (killed) {
         player.kills += 1;
         this.onEnemyDeath(bestId, enemy, sessionId);
@@ -593,6 +537,7 @@ export class DreamRoom extends Room<RoomState> {
           erRt.knockZ += kz * 9;
         }
         this.broadcast("fx", { type: "ram", x: e.x, z: e.z });
+        this.broadcast("fx", { type: "damage", target: "enemy", enemyId: id, x: e.x, y: 1.2, z: e.z, amount: Math.round(dmg) });
         if (killed) {
           player.kills += 1;
           this.onEnemyDeath(id, e, sessionId);

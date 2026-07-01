@@ -4,12 +4,13 @@ class AudioEngine {
   private master: GainNode | null = null;
   private musicGain: GainNode | null = null;
   private musicStarted = false;
+  private volume = 0.55;
 
   private ensure(): AudioContext {
     if (!this.ctx) {
       this.ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
       this.master = this.ctx.createGain();
-      this.master.gain.value = 0.55;
+      this.master.gain.value = this.volume;
       this.master.connect(this.ctx.destination);
       this.musicGain = this.ctx.createGain();
       this.musicGain.gain.value = 0.16;
@@ -17,6 +18,15 @@ class AudioEngine {
     }
     if (this.ctx.state === "suspended") this.ctx.resume();
     return this.ctx;
+  }
+
+  setVolume(v: number) {
+    this.volume = Math.max(0, Math.min(1, v));
+    if (this.master) this.master.gain.value = this.volume;
+  }
+
+  getVolume(): number {
+    return this.volume;
   }
 
   /** Must be called from a user gesture handler to unlock audio on mobile browsers. */

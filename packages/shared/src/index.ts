@@ -5,3 +5,5 @@ export * from "./dogEvolution";
 export * from "./waves";
 export * from "./rng";
 export * from "./arena";
+export * from "./movement";
+export * from "./stats";

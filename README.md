@@ -72,12 +72,17 @@ there's no separate aim stick to fight with on mobile.
   passes through it, so a Guard-built hound can freely draw aggro as a decoy.
 - **Deployments**: a run is `Wave → Supply Cache breather → Wave → … → Boss → Victory/Defeat`, scaling with
   wave index and squad size. Downed pilots aren't out — a nearby ally auto-revives them over a few seconds.
-- **Co-op netcode**: the server is authoritative over a fixed-rate simulation; the client interpolates all
-  entities (including the local player) toward the latest network state for smooth motion without full
-  client-side prediction/reconciliation. This keeps the system simple and correct; see "Next steps" below
-  for the natural follow-up.
-- **Cross-device rendering**: quality tier (shadow resolution, DPR, postprocessing) is auto-selected from
-  device type/CPU core count, and the whole HUD/touch-control layout is responsive down to phone width.
+- **Co-op netcode**: the server is authoritative over a fixed-rate simulation. Remote players/enemies/dogs
+  are interpolated toward the latest network state; the *local* player is predicted immediately from input
+  using `stepPlayerMovement` (in `@dream/shared`) - the exact same movement/collision code the server runs -
+  then continuously nudged (and hard-snapped on a big mismatch, e.g. a wave-transition teleport) toward the
+  authoritative position as it arrives. Input feels instant; the server still has final say over everything.
+- **Juice**: hit-flashes and a real death animation on enemies, floating damage numbers, muzzle flashes,
+  dash after-image trails, transform shockwaves + a camera FOV punch, screen damage flash + low-health
+  vignette, and a kill feed - all driven off a small server → client `fx` event stream.
+- **Cross-device rendering**: quality tier (shadow resolution, DPR, postprocessing, starfield/dust density)
+  is auto-selected from device type/CPU core count and adjustable from the in-game settings panel; the whole
+  HUD/touch-control layout is responsive down to phone width.
 
 ## Project layout
 
@@ -90,8 +95,9 @@ packages/
 
 ## Known limitations / natural next steps
 
-- No client-side prediction/reconciliation for the local player yet — fine at LAN/low latency, but a genuine
-  next step for play over the open internet.
+- Prediction reconciles by nudging/snapping position rather than replaying a buffered input history, so it
+  won't perfectly hide very high latency the way a full reconciliation system would - a reasonable trade for
+  a co-op (not competitive) game, and a clear next step if it's ever needed.
 - No dedicated matchmaking/hosting config included; you provide the Node host + static host for a public
   deployment.
 - Procedural low-poly art style is a deliberate scope choice (instant load, no asset pipeline) rather than

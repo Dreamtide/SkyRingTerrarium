@@ -1,45 +1,10 @@
-import { PARTS_BY_ID, PLAYER_BASE } from "@dream/shared";
+import { AggregatedStats, PARTS_BY_ID, computeStats } from "@dream/shared";
 import { PartLoadoutSchema } from "../state/schema";
 
-export interface AggregatedStats {
-  maxHealth: number;
-  maxShield: number;
-  robotSpeed: number;
-  vehicleSpeed: number;
-  damage: number;
-  armor: number;
-  fireRate: number;
-  dashCooldown: number;
-}
-
-export function computeStats(loadout: PartLoadoutSchema): AggregatedStats {
-  const stats: AggregatedStats = {
-    maxHealth: PLAYER_BASE.health,
-    maxShield: PLAYER_BASE.shield,
-    robotSpeed: PLAYER_BASE.robotSpeed,
-    vehicleSpeed: PLAYER_BASE.vehicleSpeed,
-    damage: PLAYER_BASE.damage,
-    armor: PLAYER_BASE.armor,
-    fireRate: PLAYER_BASE.fireRate,
-    dashCooldown: PLAYER_BASE.dashCooldown,
-  };
-  for (const partId of [loadout.chassis, loadout.weapon, loadout.engine, loadout.plating]) {
-    if (!partId) continue;
-    const def = PARTS_BY_ID[partId];
-    if (!def) continue;
-    if (def.stats.health) stats.maxHealth += def.stats.health;
-    if (def.stats.shield) stats.maxShield += def.stats.shield;
-    if (def.stats.speed) {
-      stats.robotSpeed += def.stats.speed;
-      stats.vehicleSpeed += def.stats.speed * 1.6;
-    }
-    if (def.stats.damage) stats.damage += def.stats.damage;
-    if (def.stats.armor) stats.armor += def.stats.armor;
-    if (def.stats.fireRate) stats.fireRate = Math.max(0.6, stats.fireRate + def.stats.fireRate);
-    if (def.stats.dashCooldown) stats.dashCooldown = Math.max(0.6, stats.dashCooldown + def.stats.dashCooldown);
-  }
-  return stats;
-}
+export type { AggregatedStats };
+// computeStats lives in @dream/shared so the client's local movement prediction
+// and the server's authoritative simulation can never disagree about mech speed.
+export { computeStats };
 
 /** Simple flat armor mitigation curve: each armor point cuts ~2% damage, capped at 70%. */
 export function mitigate(rawDamage: number, armor: number): number {

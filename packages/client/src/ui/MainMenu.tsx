@@ -3,6 +3,7 @@ import { useGameStore } from "../state/store";
 import { createLobby, joinLobby } from "../net/room";
 import { attachRoomSync } from "../net/sync";
 import { audioEngine } from "../audio/audio";
+import SettingsButton from "./SettingsPanel";
 
 export default function MainMenu() {
   const playerName = useGameStore((s) => s.playerName);
@@ -75,6 +76,7 @@ export default function MainMenu() {
           "radial-gradient(ellipse at 50% -10%, rgba(120,170,255,0.18), transparent 60%), radial-gradient(ellipse at 90% 110%, rgba(181,99,255,0.15), transparent 55%), #05070d",
       }}
     >
+      <SettingsButton />
       <div className="dream-panel" style={{ width: "min(460px, 100%)", padding: "32px 28px", textAlign: "center" }}>
         <div className="dream-title" style={{ fontSize: "clamp(28px, 6vw, 40px)", lineHeight: 1.05 }}>D.R.E.A.M.</div>
         <div style={{ color: "var(--text-dim)", fontSize: 13, letterSpacing: "0.08em", marginTop: 6, marginBottom: 26 }}>

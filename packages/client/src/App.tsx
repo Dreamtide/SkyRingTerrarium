@@ -4,6 +4,7 @@ import MainMenu from "./ui/MainMenu";
 import Lobby from "./ui/Lobby";
 import GameScreen from "./ui/GameScreen";
 import { useFxAudioBridge } from "./audio/useFxAudioBridge";
+import { initAudioFromStorage } from "./ui/SettingsPanel";
 import "./ui/theme.css";
 
 export default function App() {
@@ -14,6 +15,10 @@ export default function App() {
   useFxAudioBridge();
 
   useEffect(() => {
+    initAudioFromStorage();
+  }, []);
+
+  useEffect(() => {
     if (screen === "lobby" && hudPhase !== "lobby") {
       setScreen("game");
     }
@@ -21,9 +26,11 @@ export default function App() {
 
   return (
     <div style={{ width: "100vw", height: "100dvh", position: "relative", overflow: "hidden", background: "#05070d" }}>
-      {screen === "menu" && <MainMenu />}
-      {screen === "lobby" && <Lobby />}
-      {screen === "game" && <GameScreen />}
+      <div key={screen} className="dream-fade-in" style={{ width: "100%", height: "100%" }}>
+        {screen === "menu" && <MainMenu />}
+        {screen === "lobby" && <Lobby />}
+        {screen === "game" && <GameScreen />}
+      </div>
     </div>
   );
 }

@@ -5,6 +5,7 @@ import GameCanvas from "../scene/GameCanvas";
 import HUD from "./HUD";
 import TouchControls from "./TouchControls";
 import ResultOverlay from "./ResultOverlay";
+import ScreenEffects from "./ScreenEffects";
 import { inputManager } from "../input/InputManager";
 import { audioEngine } from "../audio/audio";
 
@@ -18,7 +19,10 @@ export default function GameScreen() {
     audioEngine.unlock();
     audioEngine.startAmbientMusic();
     const iv = setInterval(() => {
-      if (room) room.send("input", inputManager.sample());
+      if (!room) return;
+      const input = inputManager.sample();
+      input.seq = inputManager.nextSeq();
+      room.send("input", input);
     }, 1000 / TICK_RATE);
     return () => {
       inputManager.stop();
@@ -31,6 +35,7 @@ export default function GameScreen() {
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
       <GameCanvas />
+      <ScreenEffects />
       <HUD />
       {isMobile && !showResult && <TouchControls />}
       {showResult && <ResultOverlay />}
