@@ -1,7 +1,6 @@
 import { Client, Room } from "colyseus";
 import {
-  ARENA_RADIUS,
-  ArenaObstacle,
+  ArenaDef,
   DOG_TASK_LIST,
   ENEMY_BASE,
   InputState,
@@ -16,10 +15,12 @@ import {
   UPGRADE_CACHE_SECONDS,
   WAVES_PER_DEPLOYMENT,
   WaveSpawnEntry,
+  ArenaCollision,
+  boundaryRadius,
   buildWave,
   bossForDeployment,
   computeMechStats,
-  generateArenaLayout,
+  generateArena,
   getMechClass,
   mulberry32,
   resolveDogForm,
@@ -48,7 +49,7 @@ type Stats = ReturnType<typeof computeMechStats>;
 export class DreamRoom extends Room<RoomState> {
   maxClients = MAX_PLAYERS;
 
-  private obstacles: ArenaObstacle[] = [];
+  private arena: ArenaDef = generateArena(1);
   private playerRt = new Map<string, PlayerRuntime>();
   private dogRt = new Map<string, DogRuntime>();
   private enemyRt = new Map<string, EnemyRuntime>();
@@ -62,7 +63,6 @@ export class DreamRoom extends Room<RoomState> {
 
   onCreate() {
     this.setState(new RoomState());
-    this.obstacles = generateArenaLayout(1);
 
     this.onMessage("ready", (client) => {
       const p = this.state.players.get(client.sessionId);
@@ -223,6 +223,10 @@ export class DreamRoom extends Room<RoomState> {
     return computeMechStats(player.mechId, rt.upgrades, player.loadout);
   }
 
+  private collisionWorld(): ArenaCollision {
+    return { obstacles: this.arena.obstacles, shape: this.arena.shape };
+  }
+
   // ---------- sand economy ----------
 
   private awardSand(sessionId: string, gain: Partial<SandWallet>) {
@@ -324,7 +328,7 @@ export class DreamRoom extends Room<RoomState> {
 
   private beginDeployment() {
     this.state.seed = Math.floor(Math.random() * 1_000_000_000);
-    this.obstacles = generateArenaLayout(this.state.seed);
+    this.arena = generateArena(this.state.seed);
     this.rng = mulberry32(this.state.seed);
     this.allDownedTimer = 0;
     let i = 0;
@@ -410,7 +414,7 @@ export class DreamRoom extends Room<RoomState> {
     this.state.announcement = `Wave ${index + 1} of ${WAVES_PER_DEPLOYMENT}`;
     this.clearEnemies();
     this.spawnEnemyEntries(buildWave(index, this.state.players.size), 1 + index * 0.18, false);
-    this.obstacles
+    this.arena.obstacles
       .filter((o) => o.kind === "crate")
       .forEach((o) => {
         if (this.rng() < 0.45) this.spawnPickup(o.x, o.z + 1.4);
@@ -433,11 +437,11 @@ export class DreamRoom extends Room<RoomState> {
     this.clearEnemies();
     this.awardSandToAll(SAND_REWARD.perWaveClear);
     const count = 2 + this.state.players.size;
-    const center = this.arenaCenter();
     for (let i = 0; i < count; i++) {
       const ang = this.rng() * Math.PI * 2;
-      const dist = 3 + this.rng() * (ARENA_RADIUS - 8);
-      this.spawnPickup(center.x + Math.cos(ang) * dist, center.z + Math.sin(ang) * dist);
+      const maxR = boundaryRadius(this.arena.shape, ang) - 4;
+      const dist = 3 + this.rng() * Math.max(3, maxR - 3);
+      this.spawnPickup(Math.cos(ang) * dist, Math.sin(ang) * dist);
     }
   }
 
@@ -470,7 +474,8 @@ export class DreamRoom extends Room<RoomState> {
       for (let i = 0; i < entry.count; i++) {
         const id = `e${this.enemyIdCounter++}`;
         const angle = this.rng() * Math.PI * 2;
-        const dist = isBoss ? 15 : ARENA_RADIUS - 5 - this.rng() * 8;
+        const rim = boundaryRadius(this.arena.shape, angle);
+        const dist = isBoss ? Math.min(15, rim - 6) : rim - 4 - this.rng() * 8;
         const base = ENEMY_BASE[entry.type as keyof typeof ENEMY_BASE];
         const enemy = new EnemySchema();
         enemy.id = id;
@@ -606,7 +611,7 @@ export class DreamRoom extends Room<RoomState> {
           players: this.state.players,
           playerRt: this.playerRt,
           dogs: this.state.dogs,
-          obstacles: this.obstacles,
+          obstacles: this.arena.obstacles,
           onDamagePlayer: (sid, amt) => this.damagePlayer(sid, amt),
           onFx: (t, d) => this.broadcast("fx", { type: t, ...d }),
         });
@@ -637,7 +642,7 @@ export class DreamRoom extends Room<RoomState> {
     const input = rt.input;
 
     const state: MovementState = { x: player.x, z: player.z, yaw: player.yaw, mode: player.mode, transforming: player.transforming };
-    const events = stepPlayerMovement(state, rt, input, stats, this.obstacles, TICK_DT);
+    const events = stepPlayerMovement(state, rt, input, stats, this.collisionWorld(), TICK_DT);
     player.x = state.x;
     player.z = state.z;
     player.yaw = state.yaw;

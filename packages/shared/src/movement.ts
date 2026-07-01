@@ -1,16 +1,26 @@
-import { ArenaObstacle, clampToArena } from "./arena";
+import { ArenaObstacle, ArenaShapeParams, clampToShape, shapeFromSeed } from "./arena";
 import { PLAYER_BASE } from "./balance";
 import { InputState } from "./types";
+
+/** The collision world a mech moves through: obstacles + the seeded lobed boundary. */
+export interface ArenaCollision {
+  obstacles: ArenaObstacle[];
+  shape: ArenaShapeParams;
+}
+
+export function collisionFromSeed(seed: number, obstacles: ArenaObstacle[]): ArenaCollision {
+  return { obstacles, shape: shapeFromSeed(seed) };
+}
 
 /**
  * Resolves a movement delta against circular obstacles + the arena boundary.
  * Used identically by the authoritative server simulation and the client's
  * local prediction so the two can never disagree about where a collision happens.
  */
-export function resolveMove(x: number, z: number, dx: number, dz: number, obstacles: ArenaObstacle[]): { x: number; z: number } {
+export function resolveMove(x: number, z: number, dx: number, dz: number, world: ArenaCollision): { x: number; z: number } {
   let nx = x + dx;
   let nz = z + dz;
-  for (const o of obstacles) {
+  for (const o of world.obstacles) {
     const ddx = nx - o.x;
     const ddz = nz - o.z;
     const d = Math.hypot(ddx, ddz);
@@ -20,7 +30,7 @@ export function resolveMove(x: number, z: number, dx: number, dz: number, obstac
       nz = o.z + (ddz / d) * minD;
     }
   }
-  return clampToArena(nx, nz);
+  return clampToShape(world.shape, nx, nz);
 }
 
 export interface MovementState {
@@ -67,7 +77,7 @@ export function stepPlayerMovement(
   rt: MovementRuntime,
   input: InputState,
   stats: MovementStats,
-  obstacles: ArenaObstacle[],
+  world: ArenaCollision,
   dt: number
 ): MovementEvents {
   const events: MovementEvents = {};
@@ -101,7 +111,7 @@ export function stepPlayerMovement(
   if (rt.dashTimer > 0) {
     rt.dashTimer -= dt;
     const speed = PLAYER_BASE.dashDistance / 0.22;
-    const moved = resolveMove(state.x, state.z, rt.dashDirX * speed * dt, rt.dashDirZ * speed * dt, obstacles);
+    const moved = resolveMove(state.x, state.z, rt.dashDirX * speed * dt, rt.dashDirZ * speed * dt, world);
     state.x = moved.x;
     state.z = moved.z;
   } else if (dashPressed && rt.dashCooldown <= 0) {
@@ -130,7 +140,7 @@ export function stepPlayerMovement(
       dx /= len;
       dz /= len;
     }
-    const moved = resolveMove(state.x, state.z, dx * speed * dt, dz * speed * dt, obstacles);
+    const moved = resolveMove(state.x, state.z, dx * speed * dt, dz * speed * dt, world);
     state.x = moved.x;
     state.z = moved.z;
   }

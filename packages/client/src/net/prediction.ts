@@ -1,5 +1,5 @@
 import {
-  ArenaObstacle,
+  ArenaCollision,
   InputState,
   MovementEvents,
   MovementRuntime,
@@ -45,9 +45,9 @@ export class LocalPredictor {
     this.ready = true;
   }
 
-  step(input: InputState, stats: MovementStats, obstacles: ArenaObstacle[], dt: number): MovementEvents {
+  step(input: InputState, stats: MovementStats, world: ArenaCollision, dt: number): MovementEvents {
     if (!this.ready) return {};
-    return stepPlayerMovement(this.state, this.rt, input, stats, obstacles, dt);
+    return stepPlayerMovement(this.state, this.rt, input, stats, world, dt);
   }
 
   /** Pulls prediction toward the authoritative server position; hard-snaps on a big desync. */

@@ -1,7 +1,10 @@
+import { BIOMES } from "@dream/shared";
 import { useGameStore } from "../state/store";
 
 export default function Lighting() {
   const quality = useGameStore((s) => s.quality);
+  const arena = useGameStore((s) => s.arena);
+  const palette = BIOMES[arena.biome].palette;
   const shadows = quality !== "low";
 
   return (
@@ -23,7 +26,7 @@ export default function Lighting() {
         shadow-bias={-0.0015}
       />
       <directionalLight position={[-20, 10, -18]} intensity={0.35} color="#6f8dff" />
-      <fog attach="fog" args={["#060912", 34, 105]} />
+      <fog attach="fog" args={[palette.fog, 34, 105]} />
     </>
   );
 }

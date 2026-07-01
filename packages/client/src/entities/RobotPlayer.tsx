@@ -17,7 +17,7 @@ function partHue(id: string, fallback: number): number {
 export default function RobotPlayer({ sessionId, isLocal }: { sessionId: string; isLocal: boolean }) {
   const room = useGameStore((s) => s.room);
   const player = useGameStore((s) => s.players[sessionId]);
-  const obstacles = useGameStore((s) => s.obstacles);
+  const arena = useGameStore((s) => s.arena);
   const profile = useGameStore((s) => s.profile);
   const groupRef = useRef<THREE.Group>(null!);
   const lastPos = useRef(new THREE.Vector3());
@@ -66,7 +66,7 @@ export default function RobotPlayer({ sessionId, isLocal }: { sessionId: string;
       const upgrades = profile?.mechUpgrades[player.mechId] ?? freshUpgradeLevels();
       const stats: MovementStats = computeMechStats(player.mechId, upgrades, player.loadout);
       const input = inputManager.sample();
-      const events = predictor.step(input, stats, obstacles, dt);
+      const events = predictor.step(input, stats, { obstacles: arena.obstacles, shape: arena.shape }, dt);
       if (events.dashStart) fxBus.emit("dash", { sessionId, x: predictor.state.x, z: predictor.state.z, yaw: predictor.state.yaw });
       if (events.transformStart) fxBus.emit("transformStart", { sessionId, x: predictor.state.x, z: predictor.state.z });
       if (events.transformEnd) {
