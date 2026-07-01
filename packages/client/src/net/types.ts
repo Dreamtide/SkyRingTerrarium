@@ -1,0 +1,47 @@
+export interface PlayerSnapshot {
+  sessionId: string;
+  name: string;
+  color: string;
+  mode: string;
+  transforming: boolean;
+  health: number;
+  maxHealth: number;
+  shield: number;
+  maxShield: number;
+  alive: boolean;
+  downed: boolean;
+  ready: boolean;
+  kills: number;
+  partsCollected: number;
+  reviveProgress: number;
+  loadout: { chassis: string; weapon: string; engine: string; plating: string };
+}
+
+export interface DogSnapshot {
+  ownerSessionId: string;
+  task: string;
+  formId: string;
+  stage: string;
+  affGuard: number;
+  affHunt: number;
+  affScavenge: number;
+  affMend: number;
+  affScout: number;
+}
+
+export interface HudState {
+  phase: string;
+  waveIndex: number;
+  waveTimer: number;
+  seed: number;
+  hostSessionId: string;
+  coreShardsEarned: number;
+  announcement: string;
+  enemiesRemaining: number;
+  enemiesTotal: number;
+}
+
+export interface FxEvent {
+  type: string;
+  [key: string]: unknown;
+}

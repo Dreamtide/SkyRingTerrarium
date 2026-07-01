@@ -1,0 +1,661 @@
+import { Client, Room } from "colyseus";
+import {
+  ARENA_RADIUS,
+  ArenaObstacle,
+  CORE_SHARD_REWARD,
+  DOG_TASK_LIST,
+  ENEMY_BASE,
+  InputState,
+  MAX_PLAYERS,
+  MIN_PLAYERS,
+  PLAYER_BASE,
+  TICK_DT,
+  TICK_RATE,
+  UPGRADE_CACHE_SECONDS,
+  WAVES_PER_DEPLOYMENT,
+  WaveSpawnEntry,
+  buildWave,
+  bossForDeployment,
+  clampToArena,
+  generateArenaLayout,
+  mulberry32,
+  rollPart,
+} from "@dream/shared";
+import { DogSchema, EnemySchema, PickupSchema, PlayerSchema, RoomState } from "../state/schema";
+import { DogRuntime, EnemyRuntime, PlayerRuntime, freshInput } from "../sim/types";
+import { applyDamage, computeStats, mitigate, tryEquip } from "../sim/combat";
+import { damageEnemy, tickEnemy } from "../sim/enemyAI";
+import { tickDog } from "../sim/dogAI";
+
+const COLOR_PALETTE = ["#4fa8ff", "#ff5d5d", "#57d97b", "#ffb62e", "#b563ff"];
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+export class DreamRoom extends Room<RoomState> {
+  maxClients = MAX_PLAYERS;
+
+  private obstacles: ArenaObstacle[] = [];
+  private playerRt = new Map<string, PlayerRuntime>();
+  private dogRt = new Map<string, DogRuntime>();
+  private enemyRt = new Map<string, EnemyRuntime>();
+  private enemyIdCounter = 0;
+  private pickupIdCounter = 0;
+  private colorIndex = 0;
+  private allDownedTimer = 0;
+  private pendingNext: number | "boss" = 0;
+  private rng: () => number = mulberry32(1);
+
+  onCreate() {
+    this.setState(new RoomState());
+    this.obstacles = generateArenaLayout(1);
+
+    this.onMessage("ready", (client) => {
+      const p = this.state.players.get(client.sessionId);
+      if (p && this.state.phase === "lobby") p.ready = !p.ready;
+    });
+
+    this.onMessage("start", (client) => {
+      if (client.sessionId !== this.state.hostSessionId) return;
+      if (this.state.phase !== "lobby") return;
+      const players = [...this.state.players.values()];
+      if (players.length < MIN_PLAYERS) return;
+      if (players.length > 1 && !players.every((p) => p.ready)) return;
+      this.beginDeployment();
+    });
+
+    this.onMessage("returnToLobby", (client) => {
+      if (client.sessionId !== this.state.hostSessionId) return;
+      if (this.state.phase !== "victory" && this.state.phase !== "defeat") return;
+      this.resetToLobby();
+    });
+
+    this.onMessage("assignTask", (client, msg: { task?: string }) => {
+      const task = msg?.task;
+      if (!task || (!DOG_TASK_LIST.includes(task as never) && task !== "idle")) return;
+      const dog = this.state.dogs.get(client.sessionId);
+      const player = this.state.players.get(client.sessionId);
+      if (!dog || !player || !player.alive || player.downed) return;
+      dog.task = task;
+      if (task === "guard") {
+        dog.guardX = player.x;
+        dog.guardZ = player.z;
+      }
+    });
+
+    this.onMessage("input", (client, msg: Partial<InputState>) => {
+      const rt = this.playerRt.get(client.sessionId);
+      if (!rt || typeof msg?.moveX !== "number" || !isFinite(msg.moveX)) return;
+      rt.input = {
+        moveX: clamp(msg.moveX, -1, 1),
+        moveZ: isFinite(msg.moveZ as number) ? clamp(msg.moveZ as number, -1, 1) : 0,
+        yaw: isFinite(msg.yaw as number) ? (msg.yaw as number) : rt.input.yaw,
+        attack: !!msg.attack,
+        transform: !!msg.transform,
+        dash: !!msg.dash,
+        seq: (msg.seq as number) | 0,
+      };
+    });
+
+    this.setSimulationInterval(() => this.update(), 1000 / TICK_RATE);
+  }
+
+  onJoin(client: Client, options: { name?: string }) {
+    const player = new PlayerSchema();
+    player.sessionId = client.sessionId;
+    player.name = (options?.name || "Pilot").slice(0, 16);
+    player.color = COLOR_PALETTE[this.colorIndex % COLOR_PALETTE.length];
+    this.colorIndex++;
+    const idx = this.state.players.size;
+    const ang = ((Math.PI * 2) / MAX_PLAYERS) * idx;
+    player.x = Math.cos(ang) * 3;
+    player.z = Math.sin(ang) * 3;
+    player.maxHealth = PLAYER_BASE.health;
+    player.health = PLAYER_BASE.health;
+    player.maxShield = PLAYER_BASE.shield;
+    player.shield = PLAYER_BASE.shield;
+    this.state.players.set(client.sessionId, player);
+
+    const dog = new DogSchema();
+    dog.ownerSessionId = client.sessionId;
+    dog.x = player.x - 1.2;
+    dog.z = player.z - 1.2;
+    this.state.dogs.set(client.sessionId, dog);
+
+    this.playerRt.set(client.sessionId, {
+      sessionId: client.sessionId,
+      input: freshInput(),
+      attackCooldown: 0,
+      dashCooldown: 0,
+      dashTimer: 0,
+      dashDirX: 0,
+      dashDirZ: 0,
+      transformTimer: 0,
+      overdriveTimer: 0,
+      downedTimer: 0,
+      reviveProgress: 0,
+      invulnTimer: 0,
+      hitEnemyCooldowns: new Map(),
+      prevTransformBtn: false,
+      prevDashBtn: false,
+    });
+    this.dogRt.set(client.sessionId, { ownerSessionId: client.sessionId, attackCooldown: 0, guardSet: false, scoutPulseTimer: 0 });
+
+    if (!this.state.hostSessionId) this.state.hostSessionId = client.sessionId;
+  }
+
+  async onLeave(client: Client, consented: boolean) {
+    try {
+      if (consented) throw new Error("consented");
+      await this.allowReconnection(client, 20);
+    } catch {
+      this.removePlayer(client.sessionId);
+    }
+  }
+
+  private removePlayer(sessionId: string) {
+    this.state.players.delete(sessionId);
+    this.state.dogs.delete(sessionId);
+    this.playerRt.delete(sessionId);
+    this.dogRt.delete(sessionId);
+    if (this.state.hostSessionId === sessionId) {
+      const next = [...this.state.players.keys()][0];
+      this.state.hostSessionId = next ?? "";
+    }
+  }
+
+  // ---------- deployment lifecycle ----------
+
+  private beginDeployment() {
+    this.state.seed = Math.floor(Math.random() * 1_000_000_000);
+    this.obstacles = generateArenaLayout(this.state.seed);
+    this.rng = mulberry32(this.state.seed);
+    this.state.coreShardsEarned = 0;
+    this.allDownedTimer = 0;
+    let i = 0;
+    const step = (Math.PI * 2) / Math.max(1, this.state.players.size);
+    this.state.players.forEach((p) => {
+      const ang = step * i;
+      i++;
+      p.x = Math.cos(ang) * 3;
+      p.z = Math.sin(ang) * 3;
+      p.y = 0;
+      p.yaw = 0;
+      p.health = p.maxHealth;
+      p.shield = p.maxShield;
+      p.alive = true;
+      p.downed = false;
+      p.mode = "robot";
+      p.transforming = false;
+      p.reviveProgress = 0;
+      const dog = this.state.dogs.get(p.sessionId);
+      if (dog) {
+        dog.x = p.x - 1.2;
+        dog.z = p.z - 1.2;
+        dog.task = "idle";
+      }
+      const rt = this.playerRt.get(p.sessionId);
+      if (rt) {
+        rt.downedTimer = 0;
+        rt.reviveProgress = 0;
+        rt.dashCooldown = 0;
+        rt.attackCooldown = 0;
+        rt.overdriveTimer = 0;
+        rt.transformTimer = 0;
+      }
+    });
+    [...this.state.pickups.keys()].forEach((id) => this.state.pickups.delete(id));
+    this.startWave(0);
+  }
+
+  private resetToLobby() {
+    this.state.phase = "lobby";
+    this.state.players.forEach((p) => (p.ready = false));
+    this.clearEnemies();
+    [...this.state.pickups.keys()].forEach((id) => this.state.pickups.delete(id));
+    this.state.announcement = "";
+  }
+
+  private arenaCenter() {
+    let x = 0;
+    let z = 0;
+    let n = 0;
+    this.state.players.forEach((p) => {
+      x += p.x;
+      z += p.z;
+      n++;
+    });
+    return n > 0 ? { x: x / n, z: z / n } : { x: 0, z: 0 };
+  }
+
+  private clearEnemies() {
+    [...this.state.enemies.keys()].forEach((id) => this.state.enemies.delete(id));
+    this.enemyRt.clear();
+    this.state.enemiesRemaining = 0;
+    this.state.enemiesTotal = 0;
+  }
+
+  private startWave(index: number) {
+    this.state.waveIndex = index;
+    this.state.phase = "wave";
+    this.state.waveTimer = 0;
+    this.state.announcement = `Wave ${index + 1} of ${WAVES_PER_DEPLOYMENT}`;
+    this.clearEnemies();
+    this.spawnEnemyEntries(buildWave(index, this.state.players.size), 1 + index * 0.18, false);
+    this.obstacles
+      .filter((o) => o.kind === "crate")
+      .forEach((o) => {
+        if (this.rng() < 0.45) this.spawnPickup(o.x, o.z + 1.4);
+      });
+  }
+
+  private startBoss() {
+    this.state.phase = "boss";
+    this.state.waveTimer = 0;
+    this.state.announcement = "BOSS: Warforge Sentinel";
+    this.clearEnemies();
+    this.spawnEnemyEntries(bossForDeployment(), 1, true);
+  }
+
+  private startUpgrade(next: number | "boss") {
+    this.pendingNext = next;
+    this.state.phase = "upgrade";
+    this.state.waveTimer = UPGRADE_CACHE_SECONDS;
+    this.state.announcement = "Supply Cache - regroup and gear up!";
+    this.clearEnemies();
+    const count = 2 + this.state.players.size;
+    const center = this.arenaCenter();
+    for (let i = 0; i < count; i++) {
+      const ang = this.rng() * Math.PI * 2;
+      const dist = 3 + this.rng() * (ARENA_RADIUS - 8);
+      this.spawnPickup(center.x + Math.cos(ang) * dist, center.z + Math.sin(ang) * dist);
+    }
+  }
+
+  private beginNextAfterUpgrade() {
+    if (this.pendingNext === "boss") this.startBoss();
+    else this.startWave(this.pendingNext);
+  }
+
+  private victory() {
+    this.state.phase = "victory";
+    this.state.announcement = "Deployment Complete!";
+    this.state.coreShardsEarned += CORE_SHARD_REWARD.victoryBonus;
+    this.clearEnemies();
+  }
+
+  private defeat() {
+    this.state.phase = "defeat";
+    this.state.announcement = "Squad Down...";
+    this.state.coreShardsEarned += CORE_SHARD_REWARD.defeatConsolation;
+    this.clearEnemies();
+  }
+
+  private spawnEnemyEntries(entries: WaveSpawnEntry[], healthMult: number, isBoss: boolean) {
+    let total = 0;
+    const center = this.arenaCenter();
+    entries.forEach((entry) => {
+      for (let i = 0; i < entry.count; i++) {
+        const id = `e${this.enemyIdCounter++}`;
+        const angle = this.rng() * Math.PI * 2;
+        const dist = isBoss ? 15 : ARENA_RADIUS - 5 - this.rng() * 8;
+        const base = ENEMY_BASE[entry.type as keyof typeof ENEMY_BASE];
+        const enemy = new EnemySchema();
+        enemy.id = id;
+        enemy.enemyType = entry.type;
+        enemy.x = center.x + Math.cos(angle) * dist;
+        enemy.z = center.z + Math.sin(angle) * dist;
+        enemy.y = 0;
+        enemy.maxHealth = Math.round(base.health * healthMult);
+        enemy.health = enemy.maxHealth;
+        enemy.alive = true;
+        enemy.telegraph = true;
+        this.state.enemies.set(id, enemy);
+        this.enemyRt.set(id, {
+          id,
+          type: entry.type,
+          attackCooldown: 0.6,
+          targetId: null,
+          spawnTelegraph: isBoss ? 2.4 : 1.1,
+          knockX: 0,
+          knockZ: 0,
+        });
+        total++;
+      }
+    });
+    this.state.enemiesTotal = total;
+    this.state.enemiesRemaining = total;
+  }
+
+  private spawnPickup(x: number, z: number, partId?: string) {
+    const id = `p${this.pickupIdCounter++}`;
+    const pickup = new PickupSchema();
+    pickup.id = id;
+    pickup.x = x;
+    pickup.z = z;
+    pickup.partId = partId ?? rollPart(this.rng, this.state.waveIndex).id;
+    this.state.pickups.set(id, pickup);
+  }
+
+  private onEnemyDeath(id: string, enemy: EnemySchema, _killerSessionId: string) {
+    this.state.enemiesRemaining = Math.max(0, this.state.enemiesRemaining - 1);
+    this.state.coreShardsEarned += CORE_SHARD_REWARD.perKill;
+    if (enemy.enemyType === "boss") {
+      for (let i = 0; i < 4; i++) this.spawnPickup(enemy.x + (this.rng() - 0.5) * 3, enemy.z + (this.rng() - 0.5) * 3);
+    } else {
+      const dropChance = enemy.enemyType === "scrapling" ? 0.3 : 0.55;
+      if (this.rng() < dropChance) this.spawnPickup(enemy.x, enemy.z);
+    }
+    this.broadcast("fx", { type: "death", enemyType: enemy.enemyType, x: enemy.x, z: enemy.z });
+  }
+
+  private damagePlayer(targetId: string, amount: number) {
+    const player = this.state.players.get(targetId);
+    const rt = this.playerRt.get(targetId);
+    if (!player || !rt || !player.alive || player.downed) return;
+    if (rt.invulnTimer > 0) return;
+    const stats = computeStats(player.loadout);
+    const mitigated = mitigate(amount, stats.armor);
+    applyDamage(player, mitigated);
+    if (player.health <= 0) {
+      player.health = 0;
+      player.downed = true;
+      this.broadcast("fx", { type: "downed", sessionId: targetId });
+    }
+  }
+
+  // ---------- per-tick simulation ----------
+
+  private update() {
+    const phase = this.state.phase;
+    const active = phase === "wave" || phase === "boss";
+
+    this.state.players.forEach((player, sessionId) => {
+      const rt = this.playerRt.get(sessionId);
+      if (!rt) return;
+      const stats = computeStats(player.loadout);
+      if (stats.maxHealth !== player.maxHealth) {
+        const delta = stats.maxHealth - player.maxHealth;
+        player.maxHealth = stats.maxHealth;
+        if (delta > 0) player.health = Math.min(player.maxHealth, player.health + delta);
+      }
+      if (stats.maxShield !== player.maxShield) {
+        const delta = stats.maxShield - player.maxShield;
+        player.maxShield = stats.maxShield;
+        if (delta > 0) player.shield = Math.min(player.maxShield, player.shield + delta);
+      }
+      this.tickPlayerMovement(sessionId, player, rt, stats);
+      if (active) this.tickVehicleRam(sessionId, player, rt, stats);
+      this.tickFieldPickups(player);
+    });
+
+    this.tickRevivesAndDefeat();
+
+    this.state.dogs.forEach((dog, ownerId) => {
+      const owner = this.state.players.get(ownerId);
+      const rt = this.dogRt.get(ownerId);
+      if (!owner || !rt) return;
+      tickDog({
+        dog,
+        rt,
+        owner,
+        enemies: this.state.enemies,
+        pickups: this.state.pickups,
+        dt: TICK_DT,
+        onEnemyKilled: (id, e, killer) => this.onEnemyDeath(id, e, killer),
+        onFx: (t, d) => this.broadcast("fx", { type: t, ...d }),
+      });
+    });
+
+    if (active) {
+      this.state.enemies.forEach((enemy, id) => {
+        const rt = this.enemyRt.get(id);
+        if (!rt) return;
+        tickEnemy({
+          enemy,
+          rt,
+          players: this.state.players,
+          playerRt: this.playerRt,
+          dogs: this.state.dogs,
+          obstacles: this.obstacles,
+          onDamagePlayer: (sid, amt) => this.damagePlayer(sid, amt),
+          onFx: (t, d) => this.broadcast("fx", { type: t, ...d }),
+        });
+      });
+      this.state.waveTimer += TICK_DT;
+      if (this.state.enemiesTotal > 0 && this.state.enemiesRemaining <= 0) {
+        if (phase === "boss") this.victory();
+        else {
+          const next = this.state.waveIndex + 1;
+          this.startUpgrade(next >= WAVES_PER_DEPLOYMENT ? "boss" : next);
+        }
+      }
+      this.checkDefeat();
+    } else if (phase === "upgrade") {
+      this.state.waveTimer -= TICK_DT;
+      this.state.players.forEach((p) => {
+        if (p.alive && !p.downed) {
+          p.shield = Math.min(p.maxShield, p.shield + p.maxShield * 0.18 * TICK_DT);
+          p.health = Math.min(p.maxHealth, p.health + p.maxHealth * 0.035 * TICK_DT);
+        }
+      });
+      if (this.state.waveTimer <= 0) this.beginNextAfterUpgrade();
+    }
+  }
+
+  private tickPlayerMovement(sessionId: string, player: PlayerSchema, rt: PlayerRuntime, stats: ReturnType<typeof computeStats>) {
+    if (!player.alive || player.downed) return;
+    const input = rt.input;
+
+    if (rt.transformTimer > 0) {
+      rt.transformTimer -= TICK_DT;
+      if (rt.transformTimer <= 0) {
+        player.mode = player.mode === "robot" ? "vehicle" : "robot";
+        player.transforming = false;
+        this.broadcast("fx", { type: "transform", sessionId, mode: player.mode });
+      }
+      rt.prevTransformBtn = input.transform;
+      return;
+    }
+
+    const transformPressed = input.transform && !rt.prevTransformBtn;
+    rt.prevTransformBtn = input.transform;
+    if (transformPressed) {
+      rt.transformTimer = PLAYER_BASE.transformLockSeconds;
+      player.transforming = true;
+      this.broadcast("fx", { type: "transformStart", sessionId });
+      return;
+    }
+
+    if (rt.dashCooldown > 0) rt.dashCooldown -= TICK_DT;
+    const dashPressed = input.dash && !rt.prevDashBtn;
+    rt.prevDashBtn = input.dash;
+
+    if (rt.dashTimer > 0) {
+      rt.dashTimer -= TICK_DT;
+      const speed = PLAYER_BASE.dashDistance / 0.22;
+      this.movePlayer(player, rt.dashDirX * speed * TICK_DT, rt.dashDirZ * speed * TICK_DT);
+    } else if (dashPressed && rt.dashCooldown <= 0) {
+      let dx = input.moveX;
+      let dz = input.moveZ;
+      const len = Math.hypot(dx, dz);
+      if (len < 0.1) {
+        dx = Math.sin(input.yaw);
+        dz = Math.cos(input.yaw);
+      } else {
+        dx /= len;
+        dz /= len;
+      }
+      rt.dashDirX = dx;
+      rt.dashDirZ = dz;
+      rt.dashTimer = 0.22;
+      rt.dashCooldown = stats.dashCooldown;
+      rt.invulnTimer = 0.3;
+      this.broadcast("fx", { type: "dash", sessionId });
+    } else {
+      const speedBase = player.mode === "vehicle" ? stats.vehicleSpeed : stats.robotSpeed;
+      const speed = speedBase * (rt.overdriveTimer > 0 ? 1.5 : 1);
+      let dx = input.moveX;
+      let dz = input.moveZ;
+      const len = Math.hypot(dx, dz);
+      if (len > 1) {
+        dx /= len;
+        dz /= len;
+      }
+      this.movePlayer(player, dx * speed * TICK_DT, dz * speed * TICK_DT);
+    }
+
+    player.yaw = input.yaw;
+    if (rt.overdriveTimer > 0) rt.overdriveTimer -= TICK_DT;
+    if (rt.invulnTimer > 0) rt.invulnTimer -= TICK_DT;
+
+    if (rt.attackCooldown > 0) rt.attackCooldown -= TICK_DT;
+    if (input.attack && rt.attackCooldown <= 0) this.handlePlayerAttack(sessionId, player, rt, stats);
+  }
+
+  private movePlayer(player: PlayerSchema, dx: number, dz: number) {
+    let nx = player.x + dx;
+    let nz = player.z + dz;
+    for (const o of this.obstacles) {
+      const ddx = nx - o.x;
+      const ddz = nz - o.z;
+      const d = Math.hypot(ddx, ddz);
+      const minD = o.radius + 0.55;
+      if (d < minD && d > 0.0001) {
+        nx = o.x + (ddx / d) * minD;
+        nz = o.z + (ddz / d) * minD;
+      }
+    }
+    const clamped = clampToArena(nx, nz);
+    player.x = clamped.x;
+    player.z = clamped.z;
+  }
+
+  private handlePlayerAttack(sessionId: string, player: PlayerSchema, rt: PlayerRuntime, stats: ReturnType<typeof computeStats>) {
+    rt.attackCooldown = 1 / stats.fireRate;
+    if (player.mode === "vehicle") {
+      rt.overdriveTimer = 1.2;
+      this.broadcast("fx", { type: "overdrive", sessionId });
+      return;
+    }
+    let bestId: string | null = null;
+    let best: EnemySchema | null = null;
+    let bestD = Infinity;
+    this.state.enemies.forEach((e, id) => {
+      if (!e.alive) return;
+      const dx = e.x - player.x;
+      const dz = e.z - player.z;
+      const d = Math.hypot(dx, dz);
+      if (d > PLAYER_BASE.attackRange) return;
+      const ang = Math.atan2(dx, dz);
+      let diff = Math.abs(ang - player.yaw);
+      if (diff > Math.PI) diff = Math.PI * 2 - diff;
+      if (diff > 0.55) return;
+      if (d < bestD) {
+        bestD = d;
+        best = e;
+        bestId = id;
+      }
+    });
+    if (best && bestId) {
+      const enemy = best as EnemySchema;
+      const killed = damageEnemy(enemy, stats.damage);
+      this.broadcast("fx", { type: "shot", from: { x: player.x, y: 1.1, z: player.z }, to: { x: enemy.x, y: 1, z: enemy.z }, sessionId });
+      if (killed) {
+        player.kills += 1;
+        this.onEnemyDeath(bestId, enemy, sessionId);
+      }
+    } else {
+      this.broadcast("fx", { type: "shotmiss", from: { x: player.x, y: 1.1, z: player.z }, yaw: player.yaw, sessionId });
+    }
+  }
+
+  private tickVehicleRam(sessionId: string, player: PlayerSchema, rt: PlayerRuntime, stats: ReturnType<typeof computeStats>) {
+    if (player.mode !== "vehicle" || !player.alive || player.downed) return;
+    this.state.enemies.forEach((e, id) => {
+      if (!e.alive) return;
+      const d = Math.hypot(e.x - player.x, e.z - player.z);
+      const cd = rt.hitEnemyCooldowns.get(id) ?? 0;
+      if (cd > 0) {
+        rt.hitEnemyCooldowns.set(id, cd - TICK_DT);
+        return;
+      }
+      if (d < 1.7) {
+        const dmg = stats.damage * (rt.overdriveTimer > 0 ? 2.2 : 1.15);
+        const killed = damageEnemy(e, dmg);
+        rt.hitEnemyCooldowns.set(id, 0.5);
+        const erRt = this.enemyRt.get(id);
+        if (erRt) {
+          const kx = (e.x - player.x) / (d || 1);
+          const kz = (e.z - player.z) / (d || 1);
+          erRt.knockX += kx * 9;
+          erRt.knockZ += kz * 9;
+        }
+        this.broadcast("fx", { type: "ram", x: e.x, z: e.z });
+        if (killed) {
+          player.kills += 1;
+          this.onEnemyDeath(id, e, sessionId);
+        }
+      }
+    });
+  }
+
+  private tickFieldPickups(player: PlayerSchema) {
+    if (!player.alive || player.downed) return;
+    const collected: string[] = [];
+    this.state.pickups.forEach((p, id) => {
+      if (Math.hypot(p.x - player.x, p.z - player.z) < 1.3) collected.push(id);
+    });
+    collected.forEach((id) => {
+      const p = this.state.pickups.get(id);
+      if (!p) return;
+      tryEquip(player.loadout, p.partId);
+      player.partsCollected += 1;
+      this.broadcast("fx", { type: "collect", sessionId: player.sessionId, x: p.x, z: p.z });
+      this.state.pickups.delete(id);
+    });
+  }
+
+  private tickRevivesAndDefeat() {
+    const allies = [...this.state.players.values()];
+    this.state.players.forEach((player, sessionId) => {
+      const rt = this.playerRt.get(sessionId);
+      if (!rt) return;
+      if (player.downed) {
+        rt.downedTimer += TICK_DT;
+        const helped = allies.some(
+          (o) => o.sessionId !== sessionId && o.alive && !o.downed && Math.hypot(o.x - player.x, o.z - player.z) <= PLAYER_BASE.reviveRadius
+        );
+        rt.reviveProgress = helped
+          ? Math.min(PLAYER_BASE.reviveSeconds, rt.reviveProgress + TICK_DT)
+          : Math.max(0, rt.reviveProgress - TICK_DT * 0.5);
+        player.reviveProgress = rt.reviveProgress;
+        if (rt.reviveProgress >= PLAYER_BASE.reviveSeconds) {
+          player.downed = false;
+          player.health = player.maxHealth * 0.4;
+          rt.reviveProgress = 0;
+          rt.downedTimer = 0;
+          player.reviveProgress = 0;
+          this.broadcast("fx", { type: "revive", sessionId });
+        }
+      } else {
+        rt.downedTimer = 0;
+        rt.reviveProgress = 0;
+        player.reviveProgress = 0;
+      }
+    });
+  }
+
+  private checkDefeat() {
+    const players = [...this.state.players.values()];
+    if (players.length === 0) return;
+    const allDown = players.every((p) => p.downed);
+    if (allDown) {
+      this.allDownedTimer += TICK_DT;
+      if (this.allDownedTimer > 2.5) this.defeat();
+    } else {
+      this.allDownedTimer = 0;
+    }
+  }
+}

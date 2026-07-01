@@ -1,0 +1,82 @@
+:root {
+  --accent: #4fa8ff;
+  --accent2: #b563ff;
+  --danger: #ff5d5d;
+  --good: #57d97b;
+  --warn: #ffb62e;
+  --bg-panel: rgba(10, 14, 24, 0.72);
+  --bg-panel-solid: #0b0f18;
+  --border: rgba(120, 170, 255, 0.25);
+  --text: #eaf2ff;
+  --text-dim: #90a0bd;
+}
+
+.dream-panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.dream-btn {
+  font-family: inherit;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text);
+  background: linear-gradient(180deg, rgba(79, 168, 255, 0.28), rgba(79, 168, 255, 0.12));
+  border: 1px solid rgba(79, 168, 255, 0.55);
+  border-radius: 10px;
+  padding: 12px 22px;
+  cursor: pointer;
+  transition: transform 0.08s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  box-shadow: 0 0 0 rgba(79, 168, 255, 0);
+}
+.dream-btn:hover:not(:disabled) {
+  box-shadow: 0 0 18px rgba(79, 168, 255, 0.45);
+  transform: translateY(-1px);
+}
+.dream-btn:active:not(:disabled) {
+  transform: translateY(0px) scale(0.98);
+}
+.dream-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.dream-btn.secondary {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.dream-btn.danger {
+  background: linear-gradient(180deg, rgba(255, 93, 93, 0.3), rgba(255, 93, 93, 0.12));
+  border-color: rgba(255, 93, 93, 0.6);
+}
+
+.dream-input {
+  font-family: inherit;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  padding: 12px 14px;
+  font-size: 15px;
+  outline: none;
+}
+.dream-input:focus {
+  border-color: var(--accent);
+}
+
+.dream-title {
+  font-family: inherit;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  background: linear-gradient(120deg, #7fc4ff, #b563ff 60%, #ff8dd8);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 0 40px rgba(120, 170, 255, 0.25);
+}
+
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 8px; }
