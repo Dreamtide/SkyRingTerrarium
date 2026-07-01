@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace=@dream/server & npm run dev --workspace=@dream/client & wait",
+    "dev": "concurrently -n server,client -c blue,green \"npm:dev:server\" \"npm:dev:client\"",
     "dev:server": "npm run dev --workspace=@dream/server",
     "dev:client": "npm run dev --workspace=@dream/client",
     "build": "npm run build --workspace=@dream/shared && npm run build --workspace=@dream/server && npm run build --workspace=@dream/client",
@@ -15,6 +15,7 @@
     "typecheck": "npm run typecheck --workspace=@dream/shared && npm run typecheck --workspace=@dream/server && npm run typecheck --workspace=@dream/client"
   },
   "devDependencies": {
+    "concurrently": "^9.1.0",
     "typescript": "^5.6.3"
   },
   "engines": {
