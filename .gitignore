@@ -6,6 +6,9 @@ dist/
 build/
 *.tsbuildinfo
 
+# Server save data (player profiles)
+data/
+
 # Env
 .env
 .env.local

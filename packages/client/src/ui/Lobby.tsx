@@ -41,7 +41,7 @@ export default function Lobby() {
     room?.leave();
     setRoom(null);
     reset();
-    setScreen("menu");
+    setScreen("hub");
   }
 
   return (

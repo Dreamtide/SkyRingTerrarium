@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useGameStore } from "./state/store";
-import MainMenu from "./ui/MainMenu";
+import HubScreen from "./ui/hub/HubScreen";
 import Lobby from "./ui/Lobby";
 import GameScreen from "./ui/GameScreen";
 import { useFxAudioBridge } from "./audio/useFxAudioBridge";
@@ -27,7 +27,7 @@ export default function App() {
   return (
     <div style={{ width: "100vw", height: "100dvh", position: "relative", overflow: "hidden", background: "#05070d" }}>
       <div key={screen} className="dream-fade-in" style={{ width: "100%", height: "100%" }}>
-        {screen === "menu" && <MainMenu />}
+        {screen === "hub" && <HubScreen />}
         {screen === "lobby" && <Lobby />}
         {screen === "game" && <GameScreen />}
       </div>

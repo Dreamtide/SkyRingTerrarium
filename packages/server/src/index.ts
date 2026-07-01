@@ -4,6 +4,8 @@ import cors from "cors";
 import { Server } from "colyseus";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import { DreamRoom } from "./rooms/DreamRoom";
+import { profileRoutes } from "./profile/routes";
+import { profileStore } from "./profile/ProfileStore";
 
 const port = Number(process.env.PORT) || 2567;
 const app = express();
@@ -12,6 +14,7 @@ app.use(express.json());
 app.get("/", (_req, res) => {
   res.json({ ok: true, name: "D.R.E.A.M. server", rooms: ["dream_room"] });
 });
+app.use(profileRoutes());
 
 const httpServer = createServer(app);
 const gameServer = new Server({
@@ -24,3 +27,10 @@ gameServer.listen(port).then(() => {
   // eslint-disable-next-line no-console
   console.log(`D.R.E.A.M. server listening on ws://localhost:${port}`);
 });
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    profileStore.flushNow();
+    process.exit(0);
+  });
+}

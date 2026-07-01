@@ -2,13 +2,15 @@ import { Client, Room } from "colyseus";
 import {
   ARENA_RADIUS,
   ArenaObstacle,
-  CORE_SHARD_REWARD,
   DOG_TASK_LIST,
   ENEMY_BASE,
   InputState,
   MAX_PLAYERS,
   MIN_PLAYERS,
   PLAYER_BASE,
+  RUN_BOND_GAIN,
+  SAND_REWARD,
+  SandWallet,
   TICK_DT,
   TICK_RATE,
   UPGRADE_CACHE_SECONDS,
@@ -16,23 +18,32 @@ import {
   WaveSpawnEntry,
   buildWave,
   bossForDeployment,
+  computeMechStats,
   generateArenaLayout,
+  getMechClass,
   mulberry32,
+  resolveDogForm,
   rollPart,
   stepPlayerMovement,
+  MAX_BOND,
   MovementState,
 } from "@dream/shared";
-import { DogSchema, EnemySchema, PickupSchema, PlayerSchema, RoomState } from "../state/schema";
-import { DogRuntime, EnemyRuntime, PlayerRuntime, freshInput } from "../sim/types";
-import { applyDamage, computeStats, mitigate, tryEquip } from "../sim/combat";
+import { DogSchema, EnemySchema, PickupSchema, PlayerSchema, RoomState, SandDropSchema } from "../state/schema";
+import { DogRuntime, EnemyRuntime, PlayerRuntime, freshInput, freshPlayerSandState } from "../sim/types";
+import { applyDamage, mitigate, tryEquip } from "../sim/combat";
 import { damageEnemy, tickEnemy } from "../sim/enemyAI";
 import { tickDog } from "../sim/dogAI";
+import { profileStore } from "../profile/ProfileStore";
 
 const COLOR_PALETTE = ["#4fa8ff", "#ff5d5d", "#57d97b", "#ffb62e", "#b563ff"];
+const SAND_VACUUM_RADIUS = 2.4;
+const SAND_TYPES: (keyof SandWallet)[] = ["ferrite", "volt", "pyros", "chroma"];
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
+
+type Stats = ReturnType<typeof computeMechStats>;
 
 export class DreamRoom extends Room<RoomState> {
   maxClients = MAX_PLAYERS;
@@ -43,6 +54,7 @@ export class DreamRoom extends Room<RoomState> {
   private enemyRt = new Map<string, EnemyRuntime>();
   private enemyIdCounter = 0;
   private pickupIdCounter = 0;
+  private sandIdCounter = 0;
   private colorIndex = 0;
   private allDownedTimer = 0;
   private pendingNext: number | "boss" = 0;
@@ -106,7 +118,7 @@ export class DreamRoom extends Room<RoomState> {
     this.setSimulationInterval(() => this.update(), 1000 / TICK_RATE);
   }
 
-  onJoin(client: Client, options: { name?: string }) {
+  onJoin(client: Client, options: { name?: string; deviceId?: string }) {
     const player = new PlayerSchema();
     player.sessionId = client.sessionId;
     player.name = (options?.name || "Pilot").slice(0, 16);
@@ -116,20 +128,16 @@ export class DreamRoom extends Room<RoomState> {
     const ang = ((Math.PI * 2) / MAX_PLAYERS) * idx;
     player.x = Math.cos(ang) * 3;
     player.z = Math.sin(ang) * 3;
-    player.maxHealth = PLAYER_BASE.health;
-    player.health = PLAYER_BASE.health;
-    player.maxShield = PLAYER_BASE.shield;
-    player.shield = PLAYER_BASE.shield;
-    this.state.players.set(client.sessionId, player);
 
     const dog = new DogSchema();
     dog.ownerSessionId = client.sessionId;
     dog.x = player.x - 1.2;
     dog.z = player.z - 1.2;
-    this.state.dogs.set(client.sessionId, dog);
 
-    this.playerRt.set(client.sessionId, {
+    const rt: PlayerRuntime = {
       sessionId: client.sessionId,
+      deviceId: null,
+      dogProfileId: null,
       input: freshInput(),
       attackCooldown: 0,
       dashCooldown: 0,
@@ -144,7 +152,47 @@ export class DreamRoom extends Room<RoomState> {
       hitEnemyCooldowns: new Map(),
       prevTransformBtn: false,
       prevDashBtn: false,
-    });
+      ...freshPlayerSandState(),
+    };
+
+    // Restore the player's chosen mech + garage upgrades + kennel dog from their profile.
+    const deviceId = typeof options?.deviceId === "string" && /^[a-zA-Z0-9_-]{8,64}$/.test(options.deviceId) ? options.deviceId : null;
+    if (deviceId) {
+      const profile = profileStore.get(deviceId, player.name);
+      rt.deviceId = deviceId;
+      player.mechId = getMechClass(profile.selectedMechId).id;
+      rt.upgrades = { ...profile.mechUpgrades[player.mechId] };
+      const dogProfile = profile.dogs.find((d) => d.id === profile.selectedDogId) ?? profile.dogs[0];
+      if (dogProfile) {
+        rt.dogProfileId = dogProfile.id;
+        dog.name = dogProfile.name;
+        dog.bond = dogProfile.bond;
+        dog.affGuard = dogProfile.affGuard;
+        dog.affHunt = dogProfile.affHunt;
+        dog.affScavenge = dogProfile.affScavenge;
+        dog.affMend = dogProfile.affMend;
+        dog.affScout = dogProfile.affScout;
+        const form = resolveDogForm({
+          guard: dog.affGuard,
+          hunt: dog.affHunt,
+          scavenge: dog.affScavenge,
+          mend: dog.affMend,
+          scout: dog.affScout,
+        });
+        dog.formId = form.id;
+        dog.stage = form.stage;
+      }
+    }
+
+    const stats = computeMechStats(player.mechId, rt.upgrades, player.loadout);
+    player.maxHealth = stats.maxHealth;
+    player.health = stats.maxHealth;
+    player.maxShield = stats.maxShield;
+    player.shield = stats.maxShield;
+
+    this.state.players.set(client.sessionId, player);
+    this.state.dogs.set(client.sessionId, dog);
+    this.playerRt.set(client.sessionId, rt);
     this.dogRt.set(client.sessionId, { ownerSessionId: client.sessionId, attackCooldown: 0, guardSet: false, scoutPulseTimer: 0 });
 
     if (!this.state.hostSessionId) this.state.hostSessionId = client.sessionId;
@@ -155,6 +203,7 @@ export class DreamRoom extends Room<RoomState> {
       if (consented) throw new Error("consented");
       await this.allowReconnection(client, 20);
     } catch {
+      this.persistPlayer(client.sessionId, false);
       this.removePlayer(client.sessionId);
     }
   }
@@ -170,13 +219,113 @@ export class DreamRoom extends Room<RoomState> {
     }
   }
 
+  private statsFor(player: PlayerSchema, rt: PlayerRuntime): Stats {
+    return computeMechStats(player.mechId, rt.upgrades, player.loadout);
+  }
+
+  // ---------- sand economy ----------
+
+  private awardSand(sessionId: string, gain: Partial<SandWallet>) {
+    const player = this.state.players.get(sessionId);
+    const rt = this.playerRt.get(sessionId);
+    if (!player || !rt) return;
+    for (const key of SAND_TYPES) {
+      const amt = gain[key];
+      if (!amt) continue;
+      rt.sandFrac[key] += amt;
+    }
+    player.sandEarned.ferrite = Math.floor(rt.sandFrac.ferrite);
+    player.sandEarned.volt = Math.floor(rt.sandFrac.volt);
+    player.sandEarned.pyros = Math.floor(rt.sandFrac.pyros);
+    player.sandEarned.chroma = Math.floor(rt.sandFrac.chroma);
+  }
+
+  private awardSandToAll(gain: Partial<SandWallet>) {
+    this.state.players.forEach((_, sessionId) => this.awardSand(sessionId, gain));
+  }
+
+  private spawnSandBurst(x: number, z: number, enemyType: string) {
+    // Bigger enemies spill more grains; grain type is weighted so kills lean pyros but
+    // everything shows up over time, keeping all four garage tracks progressing.
+    const grains = enemyType === "boss" ? 12 : enemyType === "brute" ? 4 : 2;
+    for (let i = 0; i < grains; i++) {
+      const roll = this.rng();
+      const sandType: keyof SandWallet = roll < 0.4 ? "pyros" : roll < 0.62 ? "ferrite" : roll < 0.84 ? "volt" : "chroma";
+      const drop = new SandDropSchema();
+      drop.id = `s${this.sandIdCounter++}`;
+      drop.sandType = sandType;
+      drop.amount = enemyType === "boss" ? 4 + Math.floor(this.rng() * 4) : 1 + Math.floor(this.rng() * 3);
+      const ang = this.rng() * Math.PI * 2;
+      const dist = 0.4 + this.rng() * 1.6;
+      drop.x = x + Math.cos(ang) * dist;
+      drop.z = z + Math.sin(ang) * dist;
+      this.state.sandDrops.set(drop.id, drop);
+    }
+  }
+
+  private tickSandVacuum(player: PlayerSchema) {
+    if (!player.alive || player.downed) return;
+    const collected: string[] = [];
+    this.state.sandDrops.forEach((s, id) => {
+      if (Math.hypot(s.x - player.x, s.z - player.z) < SAND_VACUUM_RADIUS) collected.push(id);
+    });
+    for (const id of collected) {
+      const s = this.state.sandDrops.get(id);
+      if (!s) continue;
+      this.awardSand(player.sessionId, { [s.sandType]: s.amount });
+      this.broadcast("fx", { type: "sand", sessionId: player.sessionId, sandType: s.sandType, amount: s.amount, x: s.x, z: s.z });
+      this.state.sandDrops.delete(id);
+    }
+  }
+
+  private clearSandDrops() {
+    [...this.state.sandDrops.keys()].forEach((id) => this.state.sandDrops.delete(id));
+  }
+
+  /** Writes a player's run earnings + dog growth back to their persistent profile. Idempotent per run. */
+  private persistPlayer(sessionId: string, victory: boolean) {
+    const rt = this.playerRt.get(sessionId);
+    const dog = this.state.dogs.get(sessionId);
+    if (!rt || !rt.deviceId || rt.runPersisted) return;
+    const hasEarnings = SAND_TYPES.some((k) => rt.sandFrac[k] >= 1);
+    const ranAtAll = this.state.phase !== "lobby" || hasEarnings;
+    if (!ranAtAll) return;
+    rt.runPersisted = true;
+    profileStore.update(rt.deviceId, (profile) => {
+      for (const key of SAND_TYPES) {
+        profile.sand[key] += Math.floor(rt.sandFrac[key]);
+      }
+      profile.totalRuns += 1;
+      if (victory) profile.totalVictories += 1;
+      if (rt.dogProfileId && dog) {
+        const dogProfile = profile.dogs.find((d) => d.id === rt.dogProfileId);
+        if (dogProfile) {
+          dogProfile.affGuard = dog.affGuard;
+          dogProfile.affHunt = dog.affHunt;
+          dogProfile.affScavenge = dog.affScavenge;
+          dogProfile.affMend = dog.affMend;
+          dogProfile.affScout = dog.affScout;
+          dogProfile.formId = dog.formId;
+          dogProfile.stage = dog.stage;
+          dogProfile.bond = Math.min(MAX_BOND, dogProfile.bond + RUN_BOND_GAIN);
+          dogProfile.runsCompleted += 1;
+        }
+      }
+    });
+    // Reset accumulators so a subsequent run in the same room starts fresh.
+    for (const key of SAND_TYPES) rt.sandFrac[key] = 0;
+  }
+
+  private persistAll(victory: boolean) {
+    this.state.players.forEach((_, sessionId) => this.persistPlayer(sessionId, victory));
+  }
+
   // ---------- deployment lifecycle ----------
 
   private beginDeployment() {
     this.state.seed = Math.floor(Math.random() * 1_000_000_000);
     this.obstacles = generateArenaLayout(this.state.seed);
     this.rng = mulberry32(this.state.seed);
-    this.state.coreShardsEarned = 0;
     this.allDownedTimer = 0;
     let i = 0;
     const step = (Math.PI * 2) / Math.max(1, this.state.players.size);
@@ -187,6 +336,22 @@ export class DreamRoom extends Room<RoomState> {
       p.z = Math.sin(ang) * 3;
       p.y = 0;
       p.yaw = 0;
+      const rt = this.playerRt.get(p.sessionId);
+      if (rt) {
+        const stats = this.statsFor(p, rt);
+        p.maxHealth = stats.maxHealth;
+        p.maxShield = stats.maxShield;
+        rt.downedTimer = 0;
+        rt.reviveProgress = 0;
+        rt.dashCooldown = 0;
+        rt.attackCooldown = 0;
+        rt.overdriveTimer = 0;
+        rt.transformTimer = 0;
+        rt.runPersisted = false;
+        rt.lastX = p.x;
+        rt.lastZ = p.z;
+        for (const key of SAND_TYPES) rt.sandFrac[key] = 0;
+      }
       p.health = p.maxHealth;
       p.shield = p.maxShield;
       p.alive = true;
@@ -194,23 +359,19 @@ export class DreamRoom extends Room<RoomState> {
       p.mode = "robot";
       p.transforming = false;
       p.reviveProgress = 0;
+      p.sandEarned.ferrite = 0;
+      p.sandEarned.volt = 0;
+      p.sandEarned.pyros = 0;
+      p.sandEarned.chroma = 0;
       const dog = this.state.dogs.get(p.sessionId);
       if (dog) {
         dog.x = p.x - 1.2;
         dog.z = p.z - 1.2;
         dog.task = "idle";
       }
-      const rt = this.playerRt.get(p.sessionId);
-      if (rt) {
-        rt.downedTimer = 0;
-        rt.reviveProgress = 0;
-        rt.dashCooldown = 0;
-        rt.attackCooldown = 0;
-        rt.overdriveTimer = 0;
-        rt.transformTimer = 0;
-      }
     });
     [...this.state.pickups.keys()].forEach((id) => this.state.pickups.delete(id));
+    this.clearSandDrops();
     this.startWave(0);
   }
 
@@ -219,6 +380,7 @@ export class DreamRoom extends Room<RoomState> {
     this.state.players.forEach((p) => (p.ready = false));
     this.clearEnemies();
     [...this.state.pickups.keys()].forEach((id) => this.state.pickups.delete(id));
+    this.clearSandDrops();
     this.state.announcement = "";
   }
 
@@ -269,6 +431,7 @@ export class DreamRoom extends Room<RoomState> {
     this.state.waveTimer = UPGRADE_CACHE_SECONDS;
     this.state.announcement = "Supply Cache - regroup and gear up!";
     this.clearEnemies();
+    this.awardSandToAll(SAND_REWARD.perWaveClear);
     const count = 2 + this.state.players.size;
     const center = this.arenaCenter();
     for (let i = 0; i < count; i++) {
@@ -286,15 +449,18 @@ export class DreamRoom extends Room<RoomState> {
   private victory() {
     this.state.phase = "victory";
     this.state.announcement = "Deployment Complete!";
-    this.state.coreShardsEarned += CORE_SHARD_REWARD.victoryBonus;
+    this.awardSandToAll(SAND_REWARD.perWaveClear);
+    this.awardSandToAll(SAND_REWARD.victoryBonus);
     this.clearEnemies();
+    this.persistAll(true);
   }
 
   private defeat() {
     this.state.phase = "defeat";
     this.state.announcement = "Squad Down...";
-    this.state.coreShardsEarned += CORE_SHARD_REWARD.defeatConsolation;
+    this.awardSandToAll(SAND_REWARD.defeatConsolation);
     this.clearEnemies();
+    this.persistAll(false);
   }
 
   private spawnEnemyEntries(entries: WaveSpawnEntry[], healthMult: number, isBoss: boolean) {
@@ -345,7 +511,8 @@ export class DreamRoom extends Room<RoomState> {
 
   private onEnemyDeath(id: string, enemy: EnemySchema, killerSessionId: string) {
     this.state.enemiesRemaining = Math.max(0, this.state.enemiesRemaining - 1);
-    this.state.coreShardsEarned += CORE_SHARD_REWARD.perKill;
+    this.awardSand(killerSessionId, SAND_REWARD.perKill);
+    this.spawnSandBurst(enemy.x, enemy.z, enemy.enemyType);
     if (enemy.enemyType === "boss") {
       for (let i = 0; i < 4; i++) this.spawnPickup(enemy.x + (this.rng() - 0.5) * 3, enemy.z + (this.rng() - 0.5) * 3);
     } else {
@@ -360,7 +527,7 @@ export class DreamRoom extends Room<RoomState> {
     const rt = this.playerRt.get(targetId);
     if (!player || !rt || !player.alive || player.downed) return;
     if (rt.invulnTimer > 0) return;
-    const stats = computeStats(player.loadout);
+    const stats = this.statsFor(player, rt);
     const mitigated = mitigate(amount, stats.armor);
     applyDamage(player, mitigated);
     this.broadcast("fx", { type: "damage", target: "player", sessionId: targetId, x: player.x, y: 1.6, z: player.z, amount: Math.round(mitigated) });
@@ -368,6 +535,9 @@ export class DreamRoom extends Room<RoomState> {
       player.health = 0;
       player.downed = true;
       this.broadcast("fx", { type: "downed", sessionId: targetId });
+    } else {
+      // Ferrite is earned by weathering hits and staying up - tanky play feeds armor upgrades.
+      this.awardSand(targetId, { ferrite: mitigated * SAND_REWARD.perDamageTaken.ferrite });
     }
   }
 
@@ -380,7 +550,7 @@ export class DreamRoom extends Room<RoomState> {
     this.state.players.forEach((player, sessionId) => {
       const rt = this.playerRt.get(sessionId);
       if (!rt) return;
-      const stats = computeStats(player.loadout);
+      const stats = this.statsFor(player, rt);
       if (stats.maxHealth !== player.maxHealth) {
         const delta = stats.maxHealth - player.maxHealth;
         player.maxHealth = stats.maxHealth;
@@ -392,8 +562,16 @@ export class DreamRoom extends Room<RoomState> {
         if (delta > 0) player.shield = Math.min(player.maxShield, player.shield + delta);
       }
       this.tickPlayerMovement(sessionId, player, rt, stats);
-      if (active) this.tickVehicleRam(sessionId, player, rt, stats);
+      if (active) {
+        this.tickVehicleRam(sessionId, player, rt, stats);
+        // Volt is earned by covering ground - fast, mobile play feeds engine upgrades.
+        const moved = Math.hypot(player.x - rt.lastX, player.z - rt.lastZ);
+        if (moved > 0.001 && moved < 3) this.awardSand(sessionId, { volt: moved * SAND_REWARD.perDistanceUnit.volt });
+      }
+      rt.lastX = player.x;
+      rt.lastZ = player.z;
       this.tickFieldPickups(player);
+      this.tickSandVacuum(player);
     });
 
     this.tickRevivesAndDefeat();
@@ -412,6 +590,10 @@ export class DreamRoom extends Room<RoomState> {
         onEnemyKilled: (id, e, killer) => this.onEnemyDeath(id, e, killer),
         onFx: (t, d) => this.broadcast("fx", { type: t, ...d }),
       });
+      // Chroma is earned by directing your hound - support/pet play feeds systems upgrades.
+      if (active && dog.task !== "idle" && owner.alive && !owner.downed) {
+        this.awardSand(ownerId, { chroma: SAND_REWARD.perDogTaskTick.chroma * TICK_DT });
+      }
     });
 
     if (active) {
@@ -450,7 +632,7 @@ export class DreamRoom extends Room<RoomState> {
     }
   }
 
-  private tickPlayerMovement(sessionId: string, player: PlayerSchema, rt: PlayerRuntime, stats: ReturnType<typeof computeStats>) {
+  private tickPlayerMovement(sessionId: string, player: PlayerSchema, rt: PlayerRuntime, stats: Stats) {
     if (!player.alive || player.downed) return;
     const input = rt.input;
 
@@ -475,7 +657,7 @@ export class DreamRoom extends Room<RoomState> {
     if (input.attack && rt.attackCooldown <= 0) this.handlePlayerAttack(sessionId, player, rt, stats);
   }
 
-  private handlePlayerAttack(sessionId: string, player: PlayerSchema, rt: PlayerRuntime, stats: ReturnType<typeof computeStats>) {
+  private handlePlayerAttack(sessionId: string, player: PlayerSchema, rt: PlayerRuntime, stats: Stats) {
     rt.attackCooldown = 1 / stats.fireRate;
     if (player.mode === "vehicle") {
       rt.overdriveTimer = 1.2;
@@ -490,7 +672,7 @@ export class DreamRoom extends Room<RoomState> {
       const dx = e.x - player.x;
       const dz = e.z - player.z;
       const d = Math.hypot(dx, dz);
-      if (d > PLAYER_BASE.attackRange) return;
+      if (d > stats.attackRange) return;
       const ang = Math.atan2(dx, dz);
       let diff = Math.abs(ang - player.yaw);
       if (diff > Math.PI) diff = Math.PI * 2 - diff;
@@ -515,7 +697,7 @@ export class DreamRoom extends Room<RoomState> {
     }
   }
 
-  private tickVehicleRam(sessionId: string, player: PlayerSchema, rt: PlayerRuntime, stats: ReturnType<typeof computeStats>) {
+  private tickVehicleRam(sessionId: string, player: PlayerSchema, rt: PlayerRuntime, stats: Stats) {
     if (player.mode !== "vehicle" || !player.alive || player.downed) return;
     this.state.enemies.forEach((e, id) => {
       if (!e.alive) return;

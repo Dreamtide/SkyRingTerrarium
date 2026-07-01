@@ -117,6 +117,7 @@ export default function FxLayer() {
       fxBus.on("death", (d) => spawnBurst((d.x as number) ?? 0, 1, (d.z as number) ?? 0, TYPE_COLOR.death, 1.6, 0.5)),
       fxBus.on("ram", (d) => spawnBurst((d.x as number) ?? 0, 0.8, (d.z as number) ?? 0, TYPE_COLOR.ram, 1.1, 0.32)),
       fxBus.on("collect", (d) => spawnBurst((d.x as number) ?? 0, 1, (d.z as number) ?? 0, TYPE_COLOR.collect, 0.9, 0.4)),
+      fxBus.on("sand", (d) => spawnBurst((d.x as number) ?? 0, 0.3, (d.z as number) ?? 0, "#ffd76e", 0.45, 0.3)),
       fxBus.on("bite", (d) => spawnBurst((d.x as number) ?? 0, 0.6, (d.z as number) ?? 0, TYPE_COLOR.bite, 0.5, 0.22)),
       fxBus.on("dash", (d) => {
         const x = (d.x as number) ?? 0;

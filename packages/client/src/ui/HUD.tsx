@@ -1,5 +1,5 @@
-import { useEffect, useMemo } from "react";
-import { DOG_TASK_LIST } from "@dream/shared";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { DOG_TASK_LIST, SAND_COLOR, SandWallet } from "@dream/shared";
 import { useGameStore } from "../state/store";
 import { audioEngine } from "../audio/audio";
 import { inputManager } from "../input/InputManager";
@@ -168,8 +168,10 @@ function DogPanel({ bottomOffset }: { bottomOffset: number }) {
   );
 }
 
-function ShardCounter({ narrow }: { narrow: boolean }) {
-  const shards = useGameStore((s) => s.hud.coreShardsEarned);
+function SandCounter({ narrow }: { narrow: boolean }) {
+  const mySessionId = useGameStore((s) => s.mySessionId);
+  const earned = useGameStore((s) => s.players[mySessionId]?.sandEarned);
+  if (!earned) return null;
   return (
     <div
       className="dream-panel"
@@ -177,22 +179,62 @@ function ShardCounter({ narrow }: { narrow: boolean }) {
         position: "absolute",
         top: 14,
         right: 62,
-        padding: narrow ? "5px 9px" : "8px 14px",
-        fontWeight: 700,
-        fontSize: narrow ? 11 : 14,
-        color: "var(--warn)",
+        padding: narrow ? "5px 9px" : "7px 12px",
+        display: "flex",
+        gap: 8,
+        fontWeight: 800,
+        fontSize: narrow ? 10 : 12,
       }}
     >
-      ◆ {shards}
+      {(Object.keys(SAND_COLOR) as (keyof SandWallet)[]).map((t) => (
+        <span key={t} style={{ color: SAND_COLOR[t] }}>◆{earned[t]}</span>
+      ))}
     </div>
   );
 }
 
+/**
+ * In minimal mode the HUD only surfaces itself when something needs attention -
+ * phase changes, taking damage, someone downed - then fades back out. Hidden mode
+ * shows nothing at all (dog task hotkeys 1-5 still work). Configured in Settings.
+ */
+function useMinimalVisibility(): boolean {
+  const hud = useGameStore((s) => s.hud);
+  const mySessionId = useGameStore((s) => s.mySessionId);
+  const me = useGameStore((s) => s.players[mySessionId]);
+  const anyDowned = useGameStore((s) => s.playerIds.some((id) => s.players[id]?.downed));
+  const [visibleUntil, setVisibleUntil] = useState(0);
+  const [, forceTick] = useState(0);
+  const prevPhase = useRef(hud.phase);
+  const prevHealth = useRef(me?.health ?? 0);
+
+  useEffect(() => {
+    let wake = false;
+    if (hud.phase !== prevPhase.current) wake = true;
+    prevPhase.current = hud.phase;
+    const health = me?.health ?? 0;
+    if (health < prevHealth.current - 0.5) wake = true;
+    prevHealth.current = health;
+    if (me && me.health / Math.max(1, me.maxHealth) < 0.4) wake = true;
+    if (anyDowned) wake = true;
+    if (wake) setVisibleUntil(Date.now() + 4000);
+  }, [hud.phase, me, anyDowned]);
+
+  useEffect(() => {
+    const iv = setInterval(() => forceTick((t) => t + 1), 500);
+    return () => clearInterval(iv);
+  }, []);
+
+  return Date.now() < visibleUntil;
+}
+
 export default function HUD() {
   const room = useGameStore((s) => s.room);
+  const hudMode = useGameStore((s) => s.hudMode);
   const narrow = useNarrowViewport();
   const isTouch = useMemo(() => inputManager.isMobileLike(), []);
   const dogPanelBottom = isTouch ? 150 : 14;
+  const minimalVisible = useMinimalVisibility();
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -205,15 +247,32 @@ export default function HUD() {
     return () => window.removeEventListener("keydown", onKey);
   }, [room]);
 
+  if (hudMode === "hidden") {
+    return (
+      <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+        <div style={{ pointerEvents: "auto" }}>
+          <SettingsButton />
+        </div>
+      </div>
+    );
+  }
+
+  const faded = hudMode === "minimal" && !minimalVisible;
+  const fadeClass = faded ? "dream-hud-faded" : "dream-hud-visible";
+
   return (
     <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-      <PhaseBanner narrow={narrow} />
-      <SquadPanel narrow={narrow} />
-      <ShardCounter narrow={narrow} />
-      <KillFeed />
+      <div className={fadeClass}>
+        <PhaseBanner narrow={narrow} />
+        <SquadPanel narrow={narrow} />
+        {hudMode === "full" && <SandCounter narrow={narrow} />}
+        {hudMode === "full" && <KillFeed />}
+      </div>
       <div style={{ pointerEvents: "auto" }}>
         <SettingsButton />
-        <DogPanel bottomOffset={dogPanelBottom} />
+        <div className={hudMode === "minimal" && !isTouch ? fadeClass : "dream-hud-visible"} style={{ pointerEvents: faded && !isTouch ? "none" : "auto" }}>
+          <DogPanel bottomOffset={dogPanelBottom} />
+        </div>
       </div>
     </div>
   );

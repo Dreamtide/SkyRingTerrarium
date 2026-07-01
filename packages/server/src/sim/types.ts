@@ -1,7 +1,10 @@
-import { DogTask, EnemyType, InputState } from "@dream/shared";
+import { DogTask, EnemyType, InputState, MechUpgradeLevels, SandWallet, freshUpgradeLevels, freshWallet } from "@dream/shared";
 
 export interface PlayerRuntime {
   sessionId: string;
+  deviceId: string | null; // null = guest with no persistence
+  dogProfileId: string | null;
+  upgrades: MechUpgradeLevels;
   input: InputState;
   attackCooldown: number;
   dashCooldown: number;
@@ -16,6 +19,15 @@ export interface PlayerRuntime {
   hitEnemyCooldowns: Map<string, number>; // enemyId -> seconds remaining before this player can be ram-hit again
   prevTransformBtn: boolean;
   prevDashBtn: boolean;
+  // sand accounting (fractional accumulators; the schema mirrors the floored totals)
+  sandFrac: SandWallet;
+  lastX: number;
+  lastZ: number;
+  runPersisted: boolean; // guards against double-writing profile deltas (run end + leave)
+}
+
+export function freshPlayerSandState(): Pick<PlayerRuntime, "sandFrac" | "lastX" | "lastZ" | "runPersisted" | "upgrades"> {
+  return { sandFrac: freshWallet(), lastX: 0, lastZ: 0, runPersisted: false, upgrades: freshUpgradeLevels() };
 }
 
 export interface DogRuntime {

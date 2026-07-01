@@ -10,6 +10,7 @@ function snapshotPlayer(p: any): PlayerSnapshot {
     sessionId: p.sessionId,
     name: p.name,
     color: p.color,
+    mechId: p.mechId ?? "vanguard",
     mode: p.mode,
     transforming: p.transforming,
     health: p.health,
@@ -28,12 +29,20 @@ function snapshotPlayer(p: any): PlayerSnapshot {
       engine: p.loadout?.engine ?? "",
       plating: p.loadout?.plating ?? "",
     },
+    sandEarned: {
+      ferrite: p.sandEarned?.ferrite ?? 0,
+      volt: p.sandEarned?.volt ?? 0,
+      pyros: p.sandEarned?.pyros ?? 0,
+      chroma: p.sandEarned?.chroma ?? 0,
+    },
   };
 }
 
 function snapshotDog(d: any): DogSnapshot {
   return {
     ownerSessionId: d.ownerSessionId,
+    name: d.name ?? "Pup",
+    bond: d.bond ?? 0,
     task: d.task,
     formId: d.formId,
     stage: d.stage,
@@ -85,6 +94,13 @@ export function attachRoomSync(room: Room) {
     useGameStore.setState((s) => ({ pickupIds: s.pickupIds.filter((x) => x !== id) }));
   });
 
+  $(state).sandDrops.onAdd((_s: any, id: string) => {
+    useGameStore.setState((s) => ({ sandDropIds: Array.from(new Set([...s.sandDropIds, id])) }));
+  });
+  $(state).sandDrops.onRemove((_s: any, id: string) => {
+    useGameStore.setState((s) => ({ sandDropIds: s.sandDropIds.filter((x) => x !== id) }));
+  });
+
   const syncHud = () => {
     if (state.phase === undefined) return; // initial schema snapshot not decoded yet
     const h: HudState = {
@@ -93,7 +109,6 @@ export function attachRoomSync(room: Room) {
       waveTimer: state.waveTimer,
       seed: state.seed,
       hostSessionId: state.hostSessionId,
-      coreShardsEarned: state.coreShardsEarned,
       announcement: state.announcement,
       enemiesRemaining: state.enemiesRemaining,
       enemiesTotal: state.enemiesTotal,

@@ -1,21 +1,28 @@
 import { create } from "zustand";
 import type { Room } from "colyseus.js";
-import { ArenaObstacle, generateArenaLayout } from "@dream/shared";
+import { ArenaObstacle, PlayerProfile, generateArenaLayout } from "@dream/shared";
 import { DogSnapshot, HudState, PlayerSnapshot } from "../net/types";
 
-export type Screen = "menu" | "lobby" | "game";
+export type Screen = "hub" | "lobby" | "game";
 export type Quality = "low" | "medium" | "high";
+/** HUD visibility: full = everything; minimal = only combat-critical, fading when idle; hidden = nothing but the reticle. */
+export type HudMode = "full" | "minimal" | "hidden";
+export type HubPanel = "none" | "garage" | "kennel" | "deploy" | "settings";
 
 interface GameStore {
   screen: Screen;
+  hubPanel: HubPanel;
   room: Room | null;
   mySessionId: string;
   playerName: string;
   lastError: string | null;
   quality: Quality;
+  hudMode: HudMode;
+  profile: PlayerProfile | null;
   playerIds: string[];
   enemyIds: string[];
   pickupIds: string[];
+  sandDropIds: string[];
   players: Record<string, PlayerSnapshot>;
   dogs: Record<string, DogSnapshot>;
   hud: HudState;
@@ -24,15 +31,19 @@ interface GameStore {
   obstacles: ArenaObstacle[];
 
   setScreen: (s: Screen) => void;
+  setHubPanel: (p: HubPanel) => void;
   setRoom: (r: Room | null) => void;
   setMySessionId: (id: string) => void;
   setPlayerName: (n: string) => void;
   setError: (e: string | null) => void;
   setQuality: (q: Quality) => void;
+  setHudMode: (m: HudMode) => void;
+  setProfile: (p: PlayerProfile | null) => void;
 
   setPlayerIds: (ids: string[]) => void;
   setEnemyIds: (ids: string[]) => void;
   setPickupIds: (ids: string[]) => void;
+  setSandDropIds: (ids: string[]) => void;
   updatePlayer: (id: string, p: PlayerSnapshot) => void;
   removePlayer: (id: string) => void;
   updateDog: (id: string, d: DogSnapshot) => void;
@@ -47,7 +58,6 @@ const defaultHud: HudState = {
   waveTimer: 0,
   seed: 0,
   hostSessionId: "",
-  coreShardsEarned: 0,
   announcement: "",
   enemiesRemaining: 0,
   enemiesTotal: 0,
@@ -60,22 +70,32 @@ function detectDefaultQuality(): Quality {
   return "high";
 }
 
+function storedHudMode(): HudMode {
+  const raw = typeof localStorage !== "undefined" ? localStorage.getItem("dream_hud_mode") : null;
+  return raw === "minimal" || raw === "hidden" ? raw : "full";
+}
+
 export const useGameStore = create<GameStore>((set) => ({
-  screen: "menu",
+  screen: "hub",
+  hubPanel: "none",
   room: null,
   mySessionId: "",
   playerName: typeof localStorage !== "undefined" ? localStorage.getItem("dream_name") || "" : "",
   lastError: null,
   quality: detectDefaultQuality(),
+  hudMode: storedHudMode(),
+  profile: null,
   playerIds: [],
   enemyIds: [],
   pickupIds: [],
+  sandDropIds: [],
   players: {},
   dogs: {},
   hud: defaultHud,
   obstacles: [],
 
   setScreen: (s) => set({ screen: s }),
+  setHubPanel: (p) => set({ hubPanel: p }),
   setRoom: (r) => set({ room: r }),
   setMySessionId: (id) => set({ mySessionId: id }),
   setPlayerName: (n) => {
@@ -84,10 +104,16 @@ export const useGameStore = create<GameStore>((set) => ({
   },
   setError: (e) => set({ lastError: e }),
   setQuality: (q) => set({ quality: q }),
+  setHudMode: (m) => {
+    if (typeof localStorage !== "undefined") localStorage.setItem("dream_hud_mode", m);
+    set({ hudMode: m });
+  },
+  setProfile: (p) => set({ profile: p }),
 
   setPlayerIds: (ids) => set({ playerIds: ids }),
   setEnemyIds: (ids) => set({ enemyIds: ids }),
   setPickupIds: (ids) => set({ pickupIds: ids }),
+  setSandDropIds: (ids) => set({ sandDropIds: ids }),
   updatePlayer: (id, p) => set((s) => ({ players: { ...s.players, [id]: p } })),
   removePlayer: (id) =>
     set((s) => {
@@ -113,6 +139,7 @@ export const useGameStore = create<GameStore>((set) => ({
       playerIds: [],
       enemyIds: [],
       pickupIds: [],
+      sandDropIds: [],
       players: {},
       dogs: {},
       hud: defaultHud,

@@ -1,5 +1,5 @@
 import { MapSchema } from "@colyseus/schema";
-import { DOG_BASE, DOG_TASK_XP, DogTask, affinityProgress, resolveDogForm } from "@dream/shared";
+import { DOG_BASE, DOG_TASK_XP, DogTask, affinityProgress, bondMultiplier, resolveDogForm } from "@dream/shared";
 import { DogSchema, EnemySchema, PickupSchema, PlayerSchema } from "../state/schema";
 import { DogRuntime } from "./types";
 import { damageEnemy } from "./enemyAI";
@@ -16,10 +16,10 @@ export interface DogTickCtx {
   onFx: (type: string, data: Record<string, unknown>) => void;
 }
 
-function stageMult(stage: string): number {
-  if (stage === "stage3") return 2.2;
-  if (stage === "stage2") return 1.5;
-  return 1;
+/** Evolution stage x bond: a well-cared-for hound is meaningfully stronger at every stage. */
+function stageMult(dog: DogSchema): number {
+  const stage = dog.stage === "stage3" ? 2.2 : dog.stage === "stage2" ? 1.5 : 1;
+  return stage * bondMultiplier(dog.bond);
 }
 
 function moveToward(dog: DogSchema, tx: number, tz: number, speed: number, dt: number, stopDist = 0.4) {
@@ -93,7 +93,7 @@ export function tickDog(ctx: DogTickCtx) {
           moveToward(dog, n.e.x, n.e.z, DOG_BASE.speed * 1.1, dt, 1.4);
         } else if (rt.attackCooldown <= 0) {
           rt.attackCooldown = 0.75;
-          const dmg = DOG_BASE.huntDamage * stageMult(dog.stage);
+          const dmg = DOG_BASE.huntDamage * stageMult(dog);
           const killed = damageEnemy(n.e, dmg);
           addAffinity(dog, DogTask.Hunt, DOG_TASK_XP.huntKillAssist * 0.5);
           ctx.onFx("bite", { x: n.e.x, z: n.e.z, ownerSessionId: dog.ownerSessionId });
@@ -112,7 +112,7 @@ export function tickDog(ctx: DogTickCtx) {
     }
     case DogTask.Scavenge: {
       let nearest: { id: string; p: PickupSchema; d: number } | null = null;
-      const radius = DOG_BASE.scavengeRadius * stageMult(dog.stage);
+      const radius = DOG_BASE.scavengeRadius * stageMult(dog);
       ctx.pickups.forEach((p, id) => {
         const d = Math.hypot(p.x - dog.x, p.z - dog.z);
         if (d < radius && (!nearest || d < nearest.d)) nearest = { id, p, d };
@@ -145,7 +145,7 @@ export function tickDog(ctx: DogTickCtx) {
       break;
     }
     case DogTask.Mend: {
-      const radius = DOG_BASE.mendRadius * stageMult(dog.stage);
+      const radius = DOG_BASE.mendRadius * stageMult(dog);
       // find lowest health% ally within radius of the dog (falls back to owner)
       let target: PlayerSchema | null = null;
       let lowestPct = 1.01;
@@ -162,7 +162,7 @@ export function tickDog(ctx: DogTickCtx) {
       if (target && lowestPct < 0.98) {
         const t = target as PlayerSchema;
         moveToward(dog, t.x, t.z, DOG_BASE.speed * 1.2, dt, 1.3);
-        const healPerSec = DOG_BASE.mendPerSecond * stageMult(dog.stage);
+        const healPerSec = DOG_BASE.mendPerSecond * stageMult(dog);
         const before = t.health;
         t.health = Math.min(t.maxHealth, t.health + healPerSec * dt);
         const healed = t.health - before;

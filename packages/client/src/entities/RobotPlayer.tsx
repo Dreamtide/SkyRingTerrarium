@@ -1,165 +1,27 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { MovementStats, PARTS_BY_ID, PLAYER_BASE, computeStats } from "@dream/shared";
+import { MovementStats, PARTS_BY_ID, PLAYER_BASE, computeMechStats, freshUpgradeLevels } from "@dream/shared";
 import { useGameStore } from "../state/store";
 import { fxBus } from "../net/fx";
-import { damp, hueToHex, lerpAngle } from "../util/math";
+import { damp, lerpAngle } from "../util/math";
 import { LocalPredictor } from "../net/prediction";
 import { inputManager } from "../input/InputManager";
+import { MechRobotModel, MechVehicleModel, MechAnim } from "./models/MechModel";
 import NamePlate from "./NamePlate";
-
-interface AnimState {
-  speed: number;
-  walk: number;
-  transformT: number;
-  overdrive: number;
-  dashT: number;
-}
 
 function partHue(id: string, fallback: number): number {
   return id ? PARTS_BY_ID[id]?.colorHue ?? fallback : fallback;
-}
-
-function RobotForm({ color, anim, weaponHue, platingHue }: { color: string; anim: AnimState; weaponHue: number; platingHue: number }) {
-  const leftLeg = useRef<THREE.Group>(null!);
-  const rightLeg = useRef<THREE.Group>(null!);
-  const leftArm = useRef<THREE.Group>(null!);
-  const rightArm = useRef<THREE.Group>(null!);
-  const torso = useRef<THREE.Group>(null!);
-  const weaponGlow = useMemo(() => hueToHex(weaponHue, 0.75, 0.6), [weaponHue]);
-  const platingGlow = useMemo(() => hueToHex(platingHue, 0.7, 0.55), [platingHue]);
-
-  useFrame((_, dt) => {
-    const swing = Math.sin(anim.walk * 7.2) * Math.min(1, anim.speed / 6) * 0.55;
-    const counter = Math.sin(anim.walk * 7.2 + Math.PI) * Math.min(1, anim.speed / 6) * 0.55;
-    if (leftLeg.current) leftLeg.current.rotation.x = damp(leftLeg.current.rotation.x, swing, 18, dt);
-    if (rightLeg.current) rightLeg.current.rotation.x = damp(rightLeg.current.rotation.x, counter, 18, dt);
-    if (leftArm.current) leftArm.current.rotation.x = damp(leftArm.current.rotation.x, counter * 0.6, 18, dt);
-    if (rightArm.current) rightArm.current.rotation.x = damp(rightArm.current.rotation.x, swing * 0.6 - 0.2, 18, dt);
-    if (torso.current) {
-      const bob = Math.min(1, anim.speed / 6) < 0.05 ? Math.sin(anim.walk * 1.6) * 0.02 : Math.abs(Math.sin(anim.walk * 7.2)) * 0.035;
-      torso.current.position.y = damp(torso.current.position.y, 1.05 + bob, 14, dt);
-    }
-  });
-
-  return (
-    <group>
-      <group ref={torso} position={[0, 1.05, 0]}>
-        <mesh castShadow>
-          <boxGeometry args={[0.62, 0.68, 0.4]} />
-          <meshStandardMaterial color={color} metalness={0.75} roughness={0.32} />
-        </mesh>
-        <mesh position={[0, 0.02, 0.21]}>
-          <boxGeometry args={[0.26, 0.26, 0.05]} />
-          <meshStandardMaterial color="#0a0e18" emissive={platingGlow} emissiveIntensity={1.4} />
-        </mesh>
-        <mesh position={[0, 0.5, 0]} castShadow>
-          <boxGeometry args={[0.34, 0.32, 0.34]} />
-          <meshStandardMaterial color="#141a26" metalness={0.6} roughness={0.4} />
-        </mesh>
-        <mesh position={[0, 0.5, 0.16]}>
-          <boxGeometry args={[0.24, 0.08, 0.05]} />
-          <meshStandardMaterial color="#0a0e18" emissive="#8fd3ff" emissiveIntensity={2.2} />
-        </mesh>
-        <mesh position={[-0.44, 0.22, 0]} castShadow>
-          <boxGeometry args={[0.18, 0.42, 0.34]} />
-          <meshStandardMaterial color="#141a26" emissive={platingGlow} emissiveIntensity={0.35} metalness={0.7} roughness={0.3} />
-        </mesh>
-        <mesh position={[0.44, 0.22, 0]} castShadow>
-          <boxGeometry args={[0.18, 0.42, 0.34]} />
-          <meshStandardMaterial color="#141a26" emissive={platingGlow} emissiveIntensity={0.35} metalness={0.7} roughness={0.3} />
-        </mesh>
-
-        <group ref={leftArm} position={[-0.44, 0.05, 0]}>
-          <mesh position={[0, -0.32, 0]} castShadow>
-            <boxGeometry args={[0.17, 0.55, 0.17]} />
-            <meshStandardMaterial color="#1c2436" metalness={0.7} roughness={0.35} />
-          </mesh>
-        </group>
-        <group ref={rightArm} position={[0.44, 0.05, 0]}>
-          <mesh position={[0, -0.32, 0]} castShadow>
-            <boxGeometry args={[0.17, 0.55, 0.17]} />
-            <meshStandardMaterial color="#1c2436" metalness={0.7} roughness={0.35} />
-          </mesh>
-          <mesh position={[0.05, -0.62, 0.14]} rotation={[Math.PI / 2, 0, 0]} castShadow>
-            <cylinderGeometry args={[0.05, 0.07, 0.4, 8]} />
-            <meshStandardMaterial color="#0a0e18" emissive={weaponGlow} emissiveIntensity={1.6} metalness={0.5} roughness={0.4} />
-          </mesh>
-        </group>
-      </group>
-
-      <group ref={leftLeg} position={[-0.18, 0.78, 0]}>
-        <mesh position={[0, -0.36, 0]} castShadow>
-          <boxGeometry args={[0.2, 0.62, 0.22]} />
-          <meshStandardMaterial color="#20293c" metalness={0.7} roughness={0.4} />
-        </mesh>
-        <mesh position={[0, -0.68, 0.06]} castShadow>
-          <boxGeometry args={[0.24, 0.13, 0.34]} />
-          <meshStandardMaterial color="#0e1420" metalness={0.6} roughness={0.5} />
-        </mesh>
-      </group>
-      <group ref={rightLeg} position={[0.18, 0.78, 0]}>
-        <mesh position={[0, -0.36, 0]} castShadow>
-          <boxGeometry args={[0.2, 0.62, 0.22]} />
-          <meshStandardMaterial color="#20293c" metalness={0.7} roughness={0.4} />
-        </mesh>
-        <mesh position={[0, -0.68, 0.06]} castShadow>
-          <boxGeometry args={[0.24, 0.13, 0.34]} />
-          <meshStandardMaterial color="#0e1420" metalness={0.6} roughness={0.5} />
-        </mesh>
-      </group>
-    </group>
-  );
-}
-
-function VehicleForm({ color, anim, engineHue }: { color: string; anim: AnimState; engineHue: number }) {
-  const body = useRef<THREE.Group>(null!);
-  const thrusterGlow = useMemo(() => hueToHex(engineHue, 0.8, 0.6), [engineHue]);
-  const wheelSpin = useRef(0);
-
-  useFrame((_, dt) => {
-    if (body.current) {
-      const hover = Math.sin(anim.walk * 3.4) * 0.035;
-      body.current.position.y = damp(body.current.position.y, 0.42 + hover, 10, dt);
-      body.current.rotation.z = damp(body.current.rotation.z, THREE.MathUtils.clamp(-anim.speed * 0.012, -0.18, 0.18), 8, dt);
-    }
-    wheelSpin.current += dt * anim.speed * 2.2;
-  });
-
-  return (
-    <group ref={body} position={[0, 0.42, 0]}>
-      <mesh castShadow rotation={[0, Math.PI, 0]}>
-        <coneGeometry args={[0.55, 1.9, 4]} />
-        <meshStandardMaterial color={color} metalness={0.85} roughness={0.22} flatShading />
-      </mesh>
-      <mesh position={[0, -0.08, 0]} castShadow>
-        <boxGeometry args={[0.9, 0.32, 1.3]} />
-        <meshStandardMaterial color="#141a26" metalness={0.7} roughness={0.3} />
-      </mesh>
-      <mesh position={[0, 0.14, 0.35]}>
-        <boxGeometry args={[0.5, 0.16, 0.5]} />
-        <meshStandardMaterial color="#0a0e18" emissive="#8fd3ff" emissiveIntensity={1.8} />
-      </mesh>
-      <mesh position={[0, 0.02, -0.85]}>
-        <cylinderGeometry args={[0.32, 0.32, 0.22, 10]} />
-        <meshStandardMaterial
-          color="#0a0e18"
-          emissive={thrusterGlow}
-          emissiveIntensity={2.2 + Math.min(1.5, anim.speed / 8) + anim.overdrive * 2}
-        />
-      </mesh>
-    </group>
-  );
 }
 
 export default function RobotPlayer({ sessionId, isLocal }: { sessionId: string; isLocal: boolean }) {
   const room = useGameStore((s) => s.room);
   const player = useGameStore((s) => s.players[sessionId]);
   const obstacles = useGameStore((s) => s.obstacles);
+  const profile = useGameStore((s) => s.profile);
   const groupRef = useRef<THREE.Group>(null!);
   const lastPos = useRef(new THREE.Vector3());
-  const anim = useRef<AnimState>({ speed: 0, walk: 0, transformT: 0, overdrive: 0, dashT: 0 }).current;
+  const anim = useRef<MechAnim>({ speed: 0, walk: 0, overdrive: 0 }).current;
   const spinBoost = useRef(0);
   const predictorRef = useRef<LocalPredictor | null>(null);
   const [displayMode, setDisplayMode] = useState(player?.mode ?? "robot");
@@ -170,13 +32,20 @@ export default function RobotPlayer({ sessionId, isLocal }: { sessionId: string;
 
   useEffect(() => {
     if (!isLocal && player) setDisplayMode(player.mode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLocal, player?.mode]);
 
   useEffect(() => {
-    const off = fxBus.on("transformStart", (d) => {
-      if (d.sessionId === sessionId) spinBoost.current = 1;
-    });
-    return () => off();
+    const offs = [
+      fxBus.on("transformStart", (d) => {
+        if (d.sessionId === sessionId) spinBoost.current = 1;
+      }),
+      fxBus.on("overdrive", (d) => {
+        if (d.sessionId === sessionId) anim.overdrive = 1;
+      }),
+    ];
+    return () => offs.forEach((o) => o());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
   useFrame((_, dt) => {
@@ -192,7 +61,10 @@ export default function RobotPlayer({ sessionId, isLocal }: { sessionId: string;
 
     if (isLocal && predictorRef.current) {
       const predictor = predictorRef.current;
-      const stats: MovementStats = computeStats(player.loadout);
+      // Use our real garage upgrade levels so predicted speed matches the server's
+      // authoritative speed exactly - otherwise engine upgrades would cause drift.
+      const upgrades = profile?.mechUpgrades[player.mechId] ?? freshUpgradeLevels();
+      const stats: MovementStats = computeMechStats(player.mechId, upgrades, player.loadout);
       const input = inputManager.sample();
       const events = predictor.step(input, stats, obstacles, dt);
       if (events.dashStart) fxBus.emit("dash", { sessionId, x: predictor.state.x, z: predictor.state.z, yaw: predictor.state.yaw });
@@ -216,6 +88,7 @@ export default function RobotPlayer({ sessionId, isLocal }: { sessionId: string;
     const inst = Math.hypot(dx, dz) / Math.max(dt, 0.0001);
     anim.speed = damp(anim.speed, inst, 5, dt);
     lastPos.current.set(groupRef.current.position.x, 0, groupRef.current.position.z);
+    if (anim.overdrive > 0) anim.overdrive = Math.max(0, anim.overdrive - dt * 0.8);
 
     if (spinBoost.current > 0) {
       spinBoost.current = Math.max(0, spinBoost.current - dt / PLAYER_BASE.transformLockSeconds);
@@ -239,9 +112,9 @@ export default function RobotPlayer({ sessionId, isLocal }: { sessionId: string;
     <group ref={groupRef}>
       <group rotation={[player.downed ? Math.PI / 2 : 0, 0, 0]} position={[0, player.downed ? 0.3 : 0, 0]}>
         {displayMode === "vehicle" ? (
-          <VehicleForm color={player.color} anim={anim} engineHue={engineHue} />
+          <MechVehicleModel mechId={player.mechId} color={player.color} anim={anim} engineHue={engineHue} />
         ) : (
-          <RobotForm color={player.color} anim={anim} weaponHue={weaponHue} platingHue={platingHue} />
+          <MechRobotModel mechId={player.mechId} color={player.color} anim={anim} weaponHue={weaponHue} platingHue={platingHue} />
         )}
       </group>
       <NamePlate

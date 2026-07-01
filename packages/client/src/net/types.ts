@@ -1,7 +1,15 @@
+export interface SandEarnedSnapshot {
+  ferrite: number;
+  volt: number;
+  pyros: number;
+  chroma: number;
+}
+
 export interface PlayerSnapshot {
   sessionId: string;
   name: string;
   color: string;
+  mechId: string;
   mode: string;
   transforming: boolean;
   health: number;
@@ -15,10 +23,13 @@ export interface PlayerSnapshot {
   partsCollected: number;
   reviveProgress: number;
   loadout: { chassis: string; weapon: string; engine: string; plating: string };
+  sandEarned: SandEarnedSnapshot;
 }
 
 export interface DogSnapshot {
   ownerSessionId: string;
+  name: string;
+  bond: number;
   task: string;
   formId: string;
   stage: string;
@@ -35,7 +46,6 @@ export interface HudState {
   waveTimer: number;
   seed: number;
   hostSessionId: string;
-  coreShardsEarned: number;
   announcement: string;
   enemiesRemaining: number;
   enemiesTotal: number;

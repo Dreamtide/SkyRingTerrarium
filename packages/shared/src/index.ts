@@ -6,4 +6,7 @@ export * from "./waves";
 export * from "./rng";
 export * from "./arena";
 export * from "./movement";
+export * from "./mechs";
+export * from "./sand";
 export * from "./stats";
+export * from "./profile";

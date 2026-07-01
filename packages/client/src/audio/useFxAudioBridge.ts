@@ -11,6 +11,7 @@ const MAP: Record<string, keyof typeof audioEngine> = {
   transformStart: "transform",
   bite: "bite",
   collect: "collect",
+  sand: "collect",
   evolve: "evolve",
   downed: "downed",
   revive: "revive",

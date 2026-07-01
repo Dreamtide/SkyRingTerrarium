@@ -9,6 +9,7 @@ import DesktopAimController from "./DesktopAimController";
 import { Players, Dogs, Enemies, Pickups } from "./EntityGroups";
 import FxLayer from "../entities/FxLayer";
 import DamageNumbers from "../entities/DamageNumbers";
+import SandDrops from "../entities/SandDrops";
 import { inputManager } from "../input/InputManager";
 
 export default function GameCanvas() {
@@ -31,6 +32,7 @@ export default function GameCanvas() {
       <Dogs />
       <Enemies />
       <Pickups />
+      <SandDrops />
       <FxLayer />
       <DamageNumbers />
       <CameraRig />

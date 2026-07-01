@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useGameStore, Quality } from "../state/store";
+import { useGameStore, HudMode, Quality } from "../state/store";
 import { audioEngine } from "../audio/audio";
 
 const QUALITY_OPTIONS: { value: Quality; label: string }[] = [
@@ -35,9 +35,17 @@ export default function SettingsButton() {
   );
 }
 
+const HUD_OPTIONS: { value: HudMode; label: string; hint: string }[] = [
+  { value: "full", label: "Full", hint: "everything visible" },
+  { value: "minimal", label: "Minimal", hint: "appears only when needed" },
+  { value: "hidden", label: "Off", hint: "pure gameplay (hotkeys still work)" },
+];
+
 function SettingsModal({ onClose }: { onClose: () => void }) {
   const quality = useGameStore((s) => s.quality);
   const setQuality = useGameStore((s) => s.setQuality);
+  const hudMode = useGameStore((s) => s.hudMode);
+  const setHudMode = useGameStore((s) => s.setHudMode);
   const [volume, setVolume] = useState(() => readStoredVolume());
 
   useEffect(() => {
@@ -82,7 +90,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
           />
         </div>
 
-        <div>
+        <div style={{ marginBottom: 20 }}>
           <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 8, fontWeight: 700, letterSpacing: "0.04em" }}>VISUAL QUALITY</div>
           <div style={{ display: "flex", gap: 8 }}>
             {QUALITY_OPTIONS.map((opt) => (
@@ -101,6 +109,32 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
                 {opt.label}
               </button>
             ))}
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 8, fontWeight: 700, letterSpacing: "0.04em" }}>COMBAT HUD</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {HUD_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                className="dream-btn secondary"
+                title={opt.hint}
+                style={{
+                  flex: 1,
+                  padding: "8px 0",
+                  fontSize: 12,
+                  background: hudMode === opt.value ? "linear-gradient(180deg, rgba(79,168,255,0.35), rgba(79,168,255,0.12))" : undefined,
+                  borderColor: hudMode === opt.value ? "var(--accent)" : undefined,
+                }}
+                onClick={() => setHudMode(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 6 }}>
+            Minimal fades the HUD in only when something needs attention.
           </div>
         </div>
       </div>

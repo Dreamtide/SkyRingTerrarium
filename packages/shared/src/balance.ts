@@ -64,9 +64,3 @@ export const ENEMY_BASE = {
   boss: { health: 900, damage: 24, speed: 3.6, range: 15, fireRate: 0.8, xp: 20 },
 };
 
-export const CORE_SHARD_REWARD = {
-  perWaveClear: 15,
-  perKill: 1,
-  victoryBonus: 100,
-  defeatConsolation: 20,
-};
