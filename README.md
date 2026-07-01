@@ -1,9 +1,10 @@
 # D.R.E.A.M. — Dogs Ride Evolving Attack Mechs
 
-A 3D co-op action roguelite for 1–5 players, playable in the browser on desktop, tablet or phone. Pilots
-drop into procedurally-arranged arenas as transforming mechs (robot ⇄ vehicle), fight off Decepticon-style
-drone waves, salvage parts to upgrade their mech, and raise a magic hound companion that evolves based on
-the jobs you give it.
+A 3D co-op action roguelite for 1–5 players, playable in the browser on desktop, tablet or phone. From a
+peaceful tropical oceanside home base, pilots deploy into procedurally-generated biome arenas as
+transforming mechs (robot ⇄ vehicle), fight off Decepticon-style drone waves, vacuum up the cybersand that
+enemies spill, and raise magic hound companions that evolve based on the jobs you give them. Everything you
+earn persists: sand banks into permanent garage upgrades, hounds keep their growth and bond between runs.
 
 See [`DESIGN.md`](./DESIGN.md) for the full design rationale.
 
@@ -48,17 +49,36 @@ Single-stick, auto-aim combat — the same scheme works well on a touchscreen, k
 
 | Action | Desktop | Touch |
 | --- | --- | --- |
-| Move | WASD / arrows | left virtual joystick |
+| Move | WASD / arrows (aim-relative) | left virtual joystick |
+| Aim | mouse cursor (crosshair reticle) | facing follows movement |
 | Attack (robot) / Overdrive (vehicle) | Space / left click | ⊙ button |
 | Transform robot ⇄ vehicle | F / E | ⇄ button |
 | Dash (brief i-frames) | Shift / K | ⚡ button |
 | Assign dog task | 1–5 | bottom task row |
 
-Facing always tracks your movement heading and the mech auto-targets the nearest enemy in front of it, so
-there's no separate aim stick to fight with on mobile.
+On desktop the mech faces your mouse cursor independently of movement (twin-stick style, with a fixed
+ARPG camera). On touch, facing follows the movement heading. Both schemes feed the same server-side
+forward-cone auto-targeting, so combat feels equivalent across devices.
 
 ## Core systems
 
+- **The hub**: a tropical oceanside island (animated ocean shader, sunset sky, palms, your mech and hound
+  idling on the beach) that is the game's home screen. The Garage, Kennel and Deploy flows all open from a
+  single sparse action row - the combat HUD itself has a Full / Minimal / Off setting for people who want
+  pure gameplay on screen.
+- **Cybersand meta-progression**: four sand types are earned by *how* you play - pyros from kills, ferrite
+  from surviving hits, volt from ground covered, chroma from directing your hound - and destroyed enemies
+  physically spill grains you must drive over to vacuum up. Banked sand feeds per-mech permanent upgrade
+  tracks in the Garage, whose reserves render as a live falling-sand simulation (the pile's composition IS
+  your wallet: grains pour in as you earn and drain as you spend).
+- **Mech classes**: Vanguard (starter), Juggernaut, Interceptor and Artillery - distinct stats, silhouettes
+  and alt-modes, unlocked with sand. Pick your frame in the Garage before deploying.
+- **The kennel**: hounds persist between runs - affinity XP, evolved forms and bond level all carry over.
+  Bond (grown by bringing a hound on runs and feeding it chroma treats) multiplies its task effectiveness.
+  Adopt multiple pups, name them, and choose who rides along on each deployment.
+- **Biome arenas**: each run's seed generates a unique arena - one of four biomes (Nebula Verge, Ember
+  Wastes, Verdant Ruin, Glacier Rift) with its own palette, sky, fog and obstacle set, on a lobed
+  non-circular boundary shared exactly between server collision, client prediction and the ground shader.
 - **Transforming mech**: each pilot's mech has a Robot form (auto-aimed ranged attacks) and a Vehicle form
   (fast, contact-damage "ram" with an Overdrive burst). Swapping plays a snap/spin transform animation with
   a brief input lock, matching the source material's fantasy without needing a hand-authored rig.
@@ -88,10 +108,14 @@ there's no separate aim stick to fight with on mobile.
 
 ```
 packages/
-  shared/   game data & balance tables shared by client and server
-  server/   Colyseus room, simulation (enemy AI, dog AI, combat), schema state
-  client/   React + react-three-fiber game client, HUD, input, audio
+  shared/   game data, balance tables, biome/arena generation, movement & stats
+            (shared by client and server so prediction can never drift)
+  server/   Colyseus room, simulation (enemy AI, dog AI, combat), profile store + hub API
+  client/   React + react-three-fiber game client, hub scene, HUD, input, audio
 ```
+
+Player profiles (sand, unlocks, upgrades, hounds) are stored server-side in `data/profiles.json`,
+keyed by a client-generated device id. All spending/unlock validation happens on the server.
 
 ## Known limitations / natural next steps
 
